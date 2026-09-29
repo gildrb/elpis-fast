@@ -1,0 +1,946 @@
+--- a/generator/pagetable.py
++++ b/generator/pagetable.py
+@@ -76,6 +76,11 @@
+     children: list[CachePage]
+     longest_chain: int
+ 
++    # Bumped whenever this page's K/V may be (re)written: the page is claimed from the resume point on, restored
++    # from the CPU tier, or replayed after a rewind. Pages below a job's resume point are only read. Lets the
++    # prefix persistence layer (generator/persist.py) tell unchanged pages from rewritten ones
++    write_epoch: int = 0
++
+     def __repr__(self):
+         return (
+             f"CachePage: idx = {self.page_index}, ref_count = {self.ref_count}, "
+@@ -287,6 +292,11 @@
+         # Prepare block index
+         self.build_block_index_tensor()
+ 
++        # K/V from the resume point on may be (re)written by this sequence: prefill replays cached pages past the
++        # last usable recurrent checkpoint, and generation fills the fresh pages
++        for page in self.allocated_pages[cached_pages:]:
++            page.write_epoch += 1
++
+         # If recurrent model, grab cached state for prefix length
+         stashed_recurrent_state = None
+         if recurrent_cache is not None:
+@@ -593,6 +603,7 @@
+                         h in self.cpu_tier
+                     ):
+                         entry = self.cpu_tier.fetch(h, op.page_index, self.access_serial)
++                        op.write_epoch += 1
+                         op.sequence.copy_(entry["tokens"])
+                         op.prev_hash = page_hashes[lp - 1] if lp > 0 else None
+                         op.kv_position = PAGE_SIZE
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -953,6 +953,8 @@
+                 if replay_from is not None:
+                     seq.kv_position = replay_from
+                     seq.prefill_complete = False
++                    for page in seq.allocated_pages[replay_from // PAGE_SIZE:]:
++                        page.write_epoch += 1
+ 
+             # An MTP draft carry refers to the pre-rewind context; drop it so drafting pauses until the next
+             # target forward (or replay prefill) provides a fresh one. Signal the generator that any in-flight
+--- /dev/null
++++ b/generator/persist.py
+@@ -0,0 +1,898 @@
++"""
++Persistent prefix cache (elpis): carry the reusable prompt-cache state of a hybrid recurrent (GDN) model across
++process restarts.
++
++A recurrent model resumes a prompt only from a checkpoint in the RecurrentCache whose anchor page chain is complete in
++the page table (PageTable.is_resumable); prefill replays everything past it. This module persists exactly that state:
++every anchored checkpoint, every complete page on the root path of one (K/V of every paged cache, i.e. target and
++draft, plus token IDs and chain links), the page-table serials and the draft head policy. Nothing is recomputed: a
++restored page holds the bytes the running process would have reused, so the next job resumes at the same position from
++the same bytes.
++
++Layout under a private root directory (a real directory owned by this process's uid, mode 0700):
++
++    LOCK                        flock held for the process lifetime; a second process runs without persistence
++    CACHEDIR.TAG                excludes the tree from cache-aware backups
++    v1-<key>/MANIFEST           committed state, replaced atomically, trailing SHA-256
++    v1-<key>/blobs/<sha>.pg     one page: 256-byte header, int64 tokens[256], every cache segment of the page
++    v1-<key>/blobs/<sha>.st     one checkpoint: 256-byte header, then per GDN layer rec fp32 and conv bf16
++    quarantine-<key>-<utc>/     the last key directory that failed verification
++
++<key> is the SHA-256 of the binding (caller-supplied identity of image, engine, server, weights, GPU and environment,
++plus the cache geometry read here). Blobs are content-addressed (file name = SHA-256 of the file) and immutable, so a
++save writes only new pages and checkpoints. Files are parsed at fixed offsets; nothing is unpickled.
++
++Restore verifies everything before the state becomes reachable (manifest digest and binding, blob digests, headers,
++the chained page hash over the stored tokens, checkpoint positions, page-table invariants) and fails closed: any
++mismatch resets the page table and recurrent cache, quarantines the key directory and leaves a cold cache.
++
++Threading: capture() and restore() touch the generator and must run on the thread that drives it, while no job is
++queued or active. Hashing and disk writes run on a writer thread; its results are applied at the next capture().
++"""
++
++from __future__ import annotations
++
++import fcntl
++import hashlib
++import json
++import os
++import random
++import re
++import secrets
++import shutil
++import stat
++import struct
++import threading
++import time
++from concurrent.futures import ThreadPoolExecutor
++from dataclasses import dataclass, field
++
++import torch
++
++from ..constants import PAGE_SIZE
++from ..tokenizer.mm_embedding import FIRST_MM_EMBEDDING_INDEX
++from .pagetable import is_content_hash, tensor_hash_checksum
++
++FORMAT = 1
++HEADER_SIZE = 256
++TOKEN_BYTES = PAGE_SIZE * 8
++MANIFEST_MAGIC = b"ELPISMF1\n"
++PAGE_MAGIC = b"ELPISPG1"
++STASH_MAGIC = b"ELPISST1"
++# magic, format, key, phash, prev_hash, has_prev, payload length
++_PAGE_HEADER = struct.Struct("<8sI32s16s16sB7xQ")
++# magic, format, key, anchor phash, position, checkpoint size, layer count, payload length
++_STASH_HEADER = struct.Struct("<8sI32s16sQQI4xQ")
++MAX_MANIFEST_BYTES = 64 << 20
++COPY_BATCH_PAGES = 32
++WRITER_THREADS = 4
++CACHEDIR_TAG = b"Signature: 8a477f597d28d172789f06886806bc55\n# elpis prefix cache: rebuilt by the server, never back up\n"
++KEY_DIR = re.compile(r"v1-[0-9a-f]{64}\Z")
++QUARANTINE_DIR = re.compile(r"quarantine-[0-9a-f]{64}-[0-9]{8}T[0-9]{6}Z\Z")
++BLOB_NAME = re.compile(r"([0-9a-f]{64})\.(pg|st)\Z")
++STASH_MARK = "persist_blob"
++
++
++class PersistError(Exception):
++    """The persisted state or its directory is unusable; the caller falls back to a cold cache."""
++
++
++def _require(condition: bool, message: str) -> None:
++    if not condition:
++        raise PersistError(message)
++
++
++def binding_key(binding: dict) -> str:
++    return hashlib.sha256(json.dumps(binding, sort_keys = True, separators = (",", ":")).encode()).hexdigest()
++
++
++def _check_private_dir(path: str) -> None:
++    info = os.lstat(path)
++    _require(stat.S_ISDIR(info.st_mode), f"{path} is not a real directory")
++    _require(info.st_uid == os.geteuid(), f"{path} is not owned by uid {os.geteuid()}")
++    _require(stat.S_IMODE(info.st_mode) == 0o700, f"{path} must have mode 0700")
++
++
++def _private_dir(path: str) -> None:
++    try:
++        os.mkdir(path, 0o700)
++    except FileExistsError:
++        pass
++    _check_private_dir(path)
++
++
++def _open_private(path: str, size: int | None = None) -> int:
++    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
++    try:
++        info = os.fstat(fd)
++        _require(stat.S_ISREG(info.st_mode), f"{path} is not a regular file")
++        _require(info.st_uid == os.geteuid(), f"{path} is not owned by uid {os.geteuid()}")
++        _require(stat.S_IMODE(info.st_mode) & 0o077 == 0, f"{path} is readable by others")
++        _require(size is None or info.st_size == size, f"{path} has size {info.st_size}, expected {size}")
++    except BaseException:
++        os.close(fd)
++        raise
++    return fd
++
++
++def _read_into(fd: int, view: memoryview, hasher) -> None:
++    done = 0
++    while done < len(view):
++        n = os.readv(fd, [view[done:]])
++        _require(n > 0, "unexpected end of file")
++        done += n
++    hasher.update(view)
++
++
++def _write_atomic(directory: str, name: str, parts: list) -> None:
++    tmp = os.path.join(directory, f".tmp-{name}-{os.getpid()}-{secrets.token_hex(4)}")
++    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
++    try:
++        for part in parts:
++            view = memoryview(part).cast("B")
++            done = 0
++            while done < len(view):
++                done += os.write(fd, view[done:])
++        os.fsync(fd)
++    except BaseException:
++        os.close(fd)
++        os.unlink(tmp)
++        raise
++    os.close(fd)
++    os.rename(tmp, os.path.join(directory, name))
++
++
++def _fsync_dir(path: str) -> None:
++    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
++    try:
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++
++
++def _as_bytes(t: torch.Tensor) -> memoryview:
++    return memoryview(t.contiguous().view(torch.uint8).reshape(-1).numpy())
++
++
++def _hex(h: bytes | None) -> str | None:
++    return None if h is None else h.hex()
++
++
++def _unhex(value, label: str) -> bytes:
++    _require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None, f"bad {label}")
++    return bytes.fromhex(value)
++
++
++def _int(value, label: str, lo: int = 0) -> int:
++    _require(type(value) is int and value >= lo, f"bad {label}")
++    return value
++
++
++@dataclass
++class _Item:
++    """One page or checkpoint of a capture: known blob (sha) or new content (parts)"""
++    kind: str
++    phash: bytes
++    sha: str | None
++    parts: list | None = None
++    header: bytes | None = None
++    # page: (page object, write epoch at capture); checkpoint: the stash dict
++    source: object = None
++    epoch: int = 0
++
++
++@dataclass
++class Capture:
++    """Everything one save needs, taken on the generator thread; the writer only reads it"""
++    pages: list[_Item]
++    stashes: list[_Item]
++    body: dict
++    skipped: dict = field(default_factory = dict)
++    seconds: float = 0.0
++
++
++class PrefixStore:
++
++    def __init__(self, root: str, binding: dict, generator, log = print):
++        """
++        Open (and lock) the persistent prefix cache for this generator.
++
++        :param root:
++            Private root directory: must exist, be owned by this uid and have mode 0700.
++
++        :param binding:
++            JSON-serializable identity of everything outside the cache geometry that the persisted bytes depend on
++            (image, engine and server files, weights manifest, GPU/driver, relevant environment). Geometry is added
++            here from the live caches.
++
++        :param generator:
++            The Generator whose page table, recurrent cache and paged caches are persisted. Must be loaded, idle
++            and not yet used when restore() is called.
++
++        Raises PersistError when persistence cannot be used safely; the caller then runs without it.
++        """
++        self.log = log
++        self.gen = generator
++        self.pt = generator.pagetable
++        self.rc = generator.recurrent_cache
++        _require(self.rc is not None, "model has no recurrent cache")
++        _require(self.pt.cpu_tier is None, "CPU page tier is not supported")
++        _require(self.gen.cache.recurrent_state_cls.__name__ == "GDNState", "only GDN recurrent states are supported")
++
++        # Paged segments: one flat (pages, bytes) uint8 view per cache tensor, target then draft, as the CPU tier
++        caches = [generator.cache] + ([generator.draft_cache] if generator.draft_cache is not None else [])
++        self.segments = []
++        segment_desc = []
++        for ci, cache in enumerate(caches):
++            _require(not cache.model.loaded_tp, "tensor-parallel caches are not supported")
++            for lk, layer in cache.layers.items():
++                for ti, t in enumerate(layer.get_tensors()):
++                    if t is None:
++                        continue
++                    _require(t.device.type != "meta", "cache tensors are not allocated")
++                    _require(t.is_contiguous() and t.shape[0] == self.pt.max_pages, "unexpected cache tensor layout")
++                    self.segments.append(t.view(t.shape[0], -1).view(torch.uint8))
++                    segment_desc.append([ci, repr(lk), ti, str(t.dtype), list(t.shape)])
++        self.segment_bytes = [s.shape[1] for s in self.segments]
++        self.page_payload = TOKEN_BYTES + sum(self.segment_bytes)
++
++        # Checkpoint layout: GDNLayerState.stash() = (recurrent_state[slot, :1], conv_state[slot, :, :kernel])
++        self.stash_layers = []
++        stash_desc = []
++        for lk, layer in self.gen.cache.get_all_recurrent_layers().items():
++            _require(type(layer).__name__ == "GDNLayerState", "only GDN layer states are supported")
++            rec, conv = layer.recurrent_state, layer.conv_state
++            rec_shape = (1,) + tuple(rec.shape[2:])
++            conv_shape = (conv.shape[1], layer.module.conv_kernel_size)
++            self.stash_layers.append((lk, rec_shape, rec.dtype, conv_shape, conv.dtype))
++            stash_desc.append([repr(lk), list(rec_shape), str(rec.dtype), list(conv_shape), str(conv.dtype)])
++        self.stash_payload = sum(
++            _numel(r) * _itemsize(rd) + _numel(c) * _itemsize(cd) for _, r, rd, c, cd in self.stash_layers
++        )
++
++        draft = generator.draft_model
++        self.binding = {
++            "format": FORMAT,
++            "caller": binding,
++            "geometry": {
++                "page_size": PAGE_SIZE,
++                "max_pages": self.pt.max_pages,
++                "segments": segment_desc,
++                "stash_layers": stash_desc,
++                "recurrent_cache_size": self.rc.max_size,
++                "checkpoint_interval": generator.recurrent_checkpoint_interval,
++                "checkpoint_interval_pp": generator.recurrent_checkpoint_interval_pp,
++                "max_chunk_size": generator.max_chunk_size,
++                "num_draft_tokens": generator.num_draft_tokens,
++                "draft_head_policy": getattr(draft, "head_policy", None) is not None,
++            },
++        }
++        self.key = binding_key(self.binding)
++
++        # Root directory and lock
++        self.root = os.path.abspath(root)
++        _check_private_dir(self.root)
++        _require(os.access(self.root, os.W_OK | os.X_OK), f"{self.root} is not writable")
++        self.lock_fd = os.open(
++            os.path.join(self.root, "LOCK"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600
++        )
++        try:
++            fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BlockingIOError:
++            os.close(self.lock_fd)
++            raise PersistError(f"{self.root} is locked by another process") from None
++        tag = os.path.join(self.root, "CACHEDIR.TAG")
++        if not os.path.lexists(tag):
++            _write_atomic(self.root, "CACHEDIR.TAG", [CACHEDIR_TAG])
++
++        self.dir = os.path.join(self.root, f"v1-{self.key}")
++        self.blobs = os.path.join(self.dir, "blobs")
++        _private_dir(self.dir)
++        _private_dir(self.blobs)
++        self._prune_other_keys()
++        for d in (self.dir, self.blobs):
++            for name in os.listdir(d):
++                if name.startswith(".tmp-"):
++                    os.unlink(os.path.join(d, name))
++
++        # Saved state. _pages: id(page) -> (page, write epoch, phash, sha) of the blob holding its bytes
++        self._pages = {}
++        self._live = frozenset()
++        self._serial = 0
++        self._results = []
++        self._lock = threading.Lock()
++        self._writer = None
++        self._abort = threading.Event()
++        self.enabled = True
++
++
++    # Directory management
++
++    def _prune_other_keys(self) -> None:
++        """Keep the previous key directory (rollback after a promotion) and the newest quarantine; delete older."""
++        keys, quarantines = [], []
++        for name in os.listdir(self.root):
++            path = os.path.join(self.root, name)
++            if not os.path.isdir(path) or os.path.islink(path) or path == self.dir:
++                continue
++            if KEY_DIR.fullmatch(name):
++                manifest = os.path.join(path, "MANIFEST")
++                keys.append((os.lstat(manifest).st_mtime if os.path.lexists(manifest) else 0.0, path))
++            elif QUARANTINE_DIR.fullmatch(name):
++                quarantines.append((name[-16:], path))
++        for _, path in sorted(keys, reverse = True)[1:]:
++            shutil.rmtree(path)
++            self.log(f"[persist] removed old key directory {os.path.basename(path)}")
++        for _, path in sorted(quarantines, reverse = True)[1:]:
++            shutil.rmtree(path)
++
++
++    def _quarantine(self) -> None:
++        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
++        target = os.path.join(self.root, f"quarantine-{self.key}-{stamp}")
++        if os.path.lexists(target):
++            shutil.rmtree(self.dir)
++        else:
++            os.rename(self.dir, target)
++        self._prune_other_keys()
++        _private_dir(self.dir)
++        _private_dir(self.blobs)
++
++
++    # Restore
++
++    def restore(self, permute_seed: int | None = None) -> dict:
++        """
++        Load the committed state into the (fresh, idle) generator. Never raises: on any failure the page table and
++        recurrent cache are reset to cold, the key directory is quarantined and the reason is logged.
++
++        :param permute_seed:
++            Debug: place the restored pages at pseudo-random physical indices instead of 0..n-1 (the engine
++            addresses pages through block tables, so outputs must not depend on placement)
++        """
++        t0 = time.monotonic()
++        manifest_path = os.path.join(self.dir, "MANIFEST")
++        if not os.path.lexists(manifest_path):
++            self.log("[persist] no saved state for this binding; cold start")
++            return {"restored": False}
++        try:
++            with torch.inference_mode():
++                stats = self._restore(manifest_path, permute_seed)
++        except Exception as e:
++            self._reset_cold()
++            reason = str(e) if isinstance(e, PersistError) else type(e).__name__
++            try:
++                self._quarantine()
++            except OSError as qe:
++                self.enabled = False
++                self.log(f"[persist] cannot quarantine ({type(qe).__name__}); persistence disabled")
++            self.log(f"[persist] restore failed ({reason}); state quarantined, cold start")
++            return {"restored": False, "error": reason}
++        self._gc(self._live)
++        stats["seconds"] = round(time.monotonic() - t0, 3)
++        self.log(
++            f"[persist] restored serial={self._serial} pages={stats['pages']} stashes={stats['stashes']} "
++            f"in {stats['seconds']} s"
++        )
++        return stats
++
++
++    def _reset_cold(self) -> None:
++        self.pt.reset_page_table()
++        self.rc.clear()
++        self.rc.update_total_size()
++        self._pages = {}
++        self._live = frozenset()
++        self._serial = 0
++
++
++    def _load_manifest(self, path: str) -> dict:
++        fd = _open_private(path)
++        try:
++            size = os.fstat(fd).st_size
++            _require(len(MANIFEST_MAGIC) + 66 <= size <= MAX_MANIFEST_BYTES, "bad manifest size")
++            data = bytearray(size)
++            _read_into(fd, memoryview(data), hashlib.sha256())
++        finally:
++            os.close(fd)
++        body, digest = bytes(data[:-65]), bytes(data[-65:])
++        _require(digest[-1:] == b"\n" and body.endswith(b"\n"), "bad manifest framing")
++        _require(hashlib.sha256(body).hexdigest().encode() == digest[:-1], "manifest digest mismatch")
++        _require(body.startswith(MANIFEST_MAGIC), "bad manifest magic")
++        m = json.loads(body[len(MANIFEST_MAGIC):-1])
++        _require(isinstance(m, dict), "bad manifest")
++        _require(m.get("key") == self.key and m.get("binding") == self.binding, "manifest binding mismatch")
++        return m
++
++
++    def _restore(self, manifest_path: str, permute_seed: int | None) -> dict:
++        pt, rc, gen = self.pt, self.rc, self.gen
++        _require(not gen.active_jobs and not gen.pending_jobs, "generator is not idle")
++        _require(len(rc) == 0, "recurrent cache is not empty")
++        _require(all(p.ref_count == 0 and p.kv_position == 0 for p in pt.all_pages), "page table is not fresh")
++        m = self._load_manifest(manifest_path)
++        serial = _int(m.get("serial"), "serial", 1)
++        access_serial = _int(m.get("access_serial"), "access_serial", pt.max_pages)
++        last_defrag = _int(m.get("last_defrag_serial"), "last_defrag_serial", pt.max_pages)
++        pages, stashes = m.get("pages"), m.get("stashes")
++        _require(isinstance(pages, list) and isinstance(stashes, list), "bad manifest lists")
++        _require(len(pages) <= pt.max_pages, "more pages than the cache holds")
++
++        # Structure: parents before children, unique hashes, every chain rooted
++        depth, entries = {}, []
++        for e in pages:
++            _require(isinstance(e, list) and len(e) == 4, "bad page entry")
++            h = _unhex(e[0], "page hash")
++            prev = None if e[1] is None else _unhex(e[1], "prev hash")
++            _require(is_content_hash(h) and h not in depth, "bad or duplicate page hash")
++            _require(prev is None or prev in depth, "page chain not rooted")
++            depth[h] = 1 if prev is None else depth[prev] + 1
++            entries.append((h, prev, _int(e[2], "page serial"), self._blob_sha(e[3])))
++            _require(entries[-1][2] <= access_serial, "page serial ahead of the table")
++        stash_entries, seen = [], set()
++        for e in stashes:
++            _require(isinstance(e, list) and len(e) == 4, "bad stash entry")
++            h = _unhex(e[0], "stash hash")
++            _require(h in depth and h not in seen, "stash not anchored or duplicate")
++            seen.add(h)
++            position = _int(e[1], "stash position", 1)
++            _require(position == depth[h] * PAGE_SIZE, "stash position does not match its anchor depth")
++            stash_entries.append((h, position, _int(e[2], "checkpoint size", 1), self._blob_sha(e[3])))
++
++        # Page payloads: read, verify, copy to physical pages 0..n-1 (or a permutation of all pages)
++        cuda = self.segments and self.segments[0].device.type == "cuda"
++        n = len(entries)
++        placement = list(range(pt.max_pages))
++        if permute_seed is not None:
++            random.Random(permute_seed).shuffle(placement)
++        placement = placement[:n]
++        batch = min(COPY_BATCH_PAGES, max(n, 1))
++        stage = torch.empty((batch, self.page_payload), dtype = torch.uint8, pin_memory = bool(cuda))
++        header = bytearray(HEADER_SIZE)
++        tokens_all = torch.empty((n, PAGE_SIZE), dtype = torch.long)
++        for b0 in range(0, n, batch):
++            b1 = min(b0 + batch, n)
++            for j, (h, prev, _, sha) in enumerate(entries[b0:b1]):
++                fd = _open_private(self._blob_path(sha, "pg"), HEADER_SIZE + self.page_payload)
++                try:
++                    hasher = hashlib.sha256()
++                    _read_into(fd, memoryview(header), hasher)
++                    _read_into(fd, memoryview(stage[j].numpy()), hasher)
++                finally:
++                    os.close(fd)
++                _require(hasher.hexdigest() == sha, "page blob digest mismatch")
++                magic, fmt, key, ph, pv, has_prev, length = _PAGE_HEADER.unpack_from(header)
++                _require(
++                    magic == PAGE_MAGIC and fmt == FORMAT and key == bytes.fromhex(self.key) and ph == h and
++                    bool(has_prev) == (prev is not None) and (pv == prev if prev is not None else pv == bytes(16)) and
++                    length == self.page_payload and not any(header[_PAGE_HEADER.size:]),
++                    "page blob header mismatch"
++                )
++                tokens = stage[j, :TOKEN_BYTES].view(torch.long).view(1, PAGE_SIZE)
++                _require(
++                    bool(((tokens >= 0) & (tokens < FIRST_MM_EMBEDDING_INDEX)).all()),
++                    "page holds non-text token IDs"
++                )
++                _require(tensor_hash_checksum(tokens, prev) == h, "page tokens do not match the page hash")
++                tokens_all[b0 + j].copy_(tokens[0])
++            off = TOKEN_BYTES
++            for seg, nbytes in zip(self.segments, self.segment_bytes):
++                src = stage[:b1 - b0, off:off + nbytes]
++                if placement[b0:b1] == list(range(b0, b1)):
++                    seg[b0:b1].copy_(src)
++                else:
++                    idx = torch.tensor(placement[b0:b1], dtype = torch.long, device = seg.device)
++                    seg.index_copy_(0, idx, src.to(seg.device))
++                off += nbytes
++            if cuda:
++                torch.cuda.synchronize(self.segments[0].device)
++
++        # Checkpoints: read into standalone host tensors, as GDNState.stash() leaves them
++        restored = []
++        for h, position, size, sha in stash_entries:
++            fd = _open_private(self._blob_path(sha, "st"), HEADER_SIZE + self.stash_payload)
++            try:
++                hasher = hashlib.sha256()
++                _read_into(fd, memoryview(header), hasher)
++                stash = {"position": position, "checkpoint_size": size}
++                for lk, rec_shape, rec_dtype, conv_shape, conv_dtype in self.stash_layers:
++                    rec = torch.empty(rec_shape, dtype = rec_dtype)
++                    conv = torch.empty(conv_shape, dtype = conv_dtype)
++                    _read_into(fd, _as_bytes(rec), hasher)
++                    _read_into(fd, _as_bytes(conv), hasher)
++                    stash[lk] = (rec, conv)
++            finally:
++                os.close(fd)
++            _require(hasher.hexdigest() == sha, "checkpoint blob digest mismatch")
++            magic, fmt, key, ph, pos, csize, nlayers, length = _STASH_HEADER.unpack_from(header)
++            _require(
++                magic == STASH_MAGIC and fmt == FORMAT and key == bytes.fromhex(self.key) and ph == h and
++                pos == position and csize == size and nlayers == len(self.stash_layers) and
++                length == self.stash_payload and not any(header[_STASH_HEADER.size:]),
++                "checkpoint blob header mismatch"
++            )
++            stash[STASH_MARK] = (h, sha)
++            restored.append((h, stash))
++
++        # Install at the placement; everything else stays empty
++        by_index = {p.page_index: p for p in pt.all_pages}
++        for i, (h, prev, access, sha) in enumerate(entries):
++            page = by_index[placement[i]]
++            del pt.unreferenced_pages[page.phash]
++            page.phash = h
++            page.prev_hash = prev
++            page.kv_position = PAGE_SIZE
++            page.sequence.copy_(tokens_all[i:i + 1])
++            page.access_serial = access
++            page.can_revert = False
++            _require(h not in pt.unreferenced_pages, "page hash collides with an empty page")
++            pt.unreferenced_pages[h] = page
++            self._pages[id(page)] = (page, page.write_epoch, h, sha)
++        pt.access_serial = access_serial
++        pt.last_defrag_serial = last_defrag
++        for h, stash in restored:
++            rc[h] = stash
++        rc.update_total_size()
++        _require(rc.current_size <= rc.max_size, "checkpoints exceed the recurrent cache size")
++        try:
++            pt.validate_pagetable([])
++        except AssertionError:
++            raise PersistError("page table validation failed") from None
++        for h, _ in restored:
++            _require(pt.is_resumable(h), "restored checkpoint is not resumable")
++
++        policy = m.get("head_policy")
++        hp = getattr(gen.draft_model, "head_policy", None)
++        if hp is not None and policy is not None:
++            _require(isinstance(policy, dict) and set(policy) == {"recent", "hold", "use_pruned"}, "bad head policy")
++            recent, hold, use_pruned = policy["recent"], policy["hold"], policy["use_pruned"]
++            _require(
++                isinstance(recent, list) and all(type(x) is bool for x in recent) and
++                type(hold) is int and hold >= 0 and type(use_pruned) is bool,
++                "bad head policy"
++            )
++            hp.recent, hp.hold, hp.use_pruned = list(recent), hold, use_pruned
++
++        self._serial = serial
++        self._live = frozenset(e[3] for e in entries) | frozenset(e[3] for e in stash_entries)
++        return {"restored": True, "pages": n, "stashes": len(restored), "serial": serial}
++
++
++    def _blob_sha(self, value) -> str:
++        _require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None, "bad blob name")
++        return value
++
++
++    def _blob_path(self, sha: str, ext: str) -> str:
++        return os.path.join(self.blobs, f"{sha}.{ext}")
++
++
++    # Save
++
++    def busy(self) -> bool:
++        return self._writer is not None and self._writer.is_alive()
++
++
++    def _apply_results(self) -> None:
++        with self._lock:
++            results, self._results = self._results, []
++        for kind, item, sha in results:
++            if kind == "page":
++                page, epoch = item.source, item.epoch
++                self._pages[id(page)] = (page, epoch, item.phash, sha)
++            elif kind == "stash":
++                stash = item.source
++                if self.rc.get(item.phash) is stash:
++                    stash[STASH_MARK] = (item.phash, sha)
++            elif kind == "live":
++                self._live = item
++
++
++    def anchored(self) -> tuple[list, list, dict]:
++        """
++        The state the engine can resume from: anchored checkpoints (RecurrentCache LRU order) and the pages on their
++        root paths (parents first). Every chain link is re-verified against the page's stored tokens; checkpoints
++        whose chain is broken, unverifiable or at the wrong depth are skipped and counted.
++        """
++        pt, rc = self.pt, self.rc
++        complete = {
++            p.phash: p for p in pt.all_pages if p.kv_position == PAGE_SIZE and is_content_hash(p.phash)
++        }
++        verified = {}
++
++        def chain_of(h):
++            chain = []
++            while h is not None:
++                p = complete.get(h)
++                if p is None or len(chain) > pt.max_pages:
++                    return None
++                ok = verified.get(h)
++                if ok is None:
++                    ok = verified[h] = (
++                        tensor_hash_checksum(p.sequence, p.prev_hash) == p.phash and
++                        bool((p.sequence >= 0).all()) and bool((p.sequence < FIRST_MM_EMBEDDING_INDEX).all())
++                    )
++                if not ok:
++                    return None
++                chain.append(p)
++                h = p.prev_hash
++            chain.reverse()
++            return chain
++
++        skipped = {"stranded": 0, "position": 0, "layout": 0}
++        stashes, pages = [], {}
++        for h, stash in rc.items():
++            chain = chain_of(h)
++            if chain is None:
++                skipped["stranded"] += 1
++                continue
++            if stash.get("position") != len(chain) * PAGE_SIZE:
++                skipped["position"] += 1
++                continue
++            if not self._stash_layout_ok(stash):
++                skipped["layout"] += 1
++                continue
++            stashes.append((h, stash))
++            for depth, p in enumerate(chain):
++                pages.setdefault(p.phash, (depth, p))
++        ordered = [p for _, p in sorted(pages.values(), key = lambda dp: (dp[0], dp[1].page_index))]
++        return ordered, stashes, skipped
++
++
++    def _stash_layout_ok(self, stash: dict) -> bool:
++        if "tp_handle" in stash or type(stash.get("checkpoint_size")) is not int:
++            return False
++        for lk, rec_shape, rec_dtype, conv_shape, conv_dtype in self.stash_layers:
++            pair = stash.get(lk)
++            if not isinstance(pair, tuple) or len(pair) != 2:
++                return False
++            rec, conv = pair
++            if (
++                not isinstance(rec, torch.Tensor) or rec.device.type != "cpu" or tuple(rec.shape) != rec_shape or
++                rec.dtype != rec_dtype or not isinstance(conv, torch.Tensor) or conv.device.type != "cpu" or
++                tuple(conv.shape) != conv_shape or conv.dtype != conv_dtype
++            ):
++                return False
++        return True
++
++
++    def capture(self, verify: bool = False) -> Capture | None:
++        """
++        Take a consistent snapshot on the generator thread (idle generator). Pages whose bytes are already saved and
++        unchanged (same page object, phash and write epoch, blob still live) are referenced by digest; the rest are
++        copied to host memory. With verify, clean pages are copied too and their digests checked against the
++        record (debug: proves the write-epoch bookkeeping). Returns None if the generator is not idle.
++        """
++        if not self.enabled or self.busy():
++            return None
++        t0 = time.monotonic()
++        gen, pt = self.gen, self.pt
++        if gen.active_jobs or gen.pending_jobs or any(p.ref_count for p in pt.all_pages):
++            return None
++        self._apply_results()
++        with torch.inference_mode():
++            if self.segments and self.segments[0].device.type == "cuda":
++                torch.cuda.synchronize(self.segments[0].device)
++            ordered, stashes, skipped = self.anchored()
++            key = bytes.fromhex(self.key)
++
++            page_items, dirty = [], []
++            for p in ordered:
++                rec = self._pages.get(id(p))
++                clean = (
++                    rec is not None and rec[0] is p and rec[1] == p.write_epoch and rec[2] == p.phash and
++                    rec[3] in self._live
++                )
++                item = _Item("page", p.phash, rec[3] if clean else None, source = p, epoch = p.write_epoch)
++                page_items.append(item)
++                if not clean or verify:
++                    dirty.append(item)
++            for b0 in range(0, len(dirty), COPY_BATCH_PAGES):
++                chunk = dirty[b0:b0 + COPY_BATCH_PAGES]
++                gathered = []
++                for seg in self.segments:
++                    idx = torch.tensor([it.source.page_index for it in chunk], dtype = torch.long, device = seg.device)
++                    gathered.append(seg.index_select(0, idx).cpu())
++                for j, it in enumerate(chunk):
++                    p = it.source
++                    it.header = _page_header(key, p.phash, p.prev_hash, self.page_payload)
++                    it.parts = [_as_bytes(p.sequence.clone())] + [memoryview(g[j].numpy()) for g in gathered]
++
++            stash_items = []
++            for h, stash in stashes:
++                mark = stash.get(STASH_MARK)
++                known = mark[1] if mark is not None and mark[0] == h and mark[1] in self._live else None
++                item = _Item("stash", h, known, source = stash)
++                if known is None or verify:
++                    item.header = _stash_header(
++                        key, h, stash["position"], stash["checkpoint_size"], len(self.stash_layers), self.stash_payload
++                    )
++                    item.parts = []
++                    for lk, *_ in self.stash_layers:
++                        rec, conv = stash[lk]
++                        item.parts += [_as_bytes(rec), _as_bytes(conv)]
++                stash_items.append(item)
++
++            hp = getattr(gen.draft_model, "head_policy", None)
++            body = {
++                "magic": "elpis-prefix-cache",
++                "format": FORMAT,
++                "key": self.key,
++                "binding": self.binding,
++                "access_serial": pt.access_serial,
++                "last_defrag_serial": pt.last_defrag_serial,
++                "head_policy": None if hp is None else {
++                    "recent": [bool(x) for x in hp.recent], "hold": int(hp.hold), "use_pruned": bool(hp.use_pruned),
++                },
++                "_pages": [(it.phash, it.source.prev_hash, it.source.access_serial) for it in page_items],
++                "_stashes": [(it.phash, it.source["position"], it.source["checkpoint_size"]) for it in stash_items],
++            }
++        return Capture(page_items, stash_items, body, skipped, time.monotonic() - t0)
++
++
++    def save(self, capture: Capture, background: bool = True, deadline: float | None = None) -> bool:
++        """Write a capture's new blobs and commit its manifest (on a writer thread unless background is False)."""
++        if not self.enabled:
++            return False
++        if background:
++            self._abort.clear()
++            self._writer = threading.Thread(target = self._write_logged, args = (capture, None), daemon = True)
++            self._writer.start()
++            return True
++        return self._write_logged(capture, deadline)
++
++
++    def wait(self, timeout: float | None) -> bool:
++        """Wait for the writer; True if it finished within the timeout."""
++        if self._writer is None:
++            return True
++        self._writer.join(timeout)
++        return not self._writer.is_alive()
++
++
++    def abort(self) -> None:
++        """Ask the writer to stop before committing (the previous manifest stays valid)."""
++        self._abort.set()
++
++
++    def _write_logged(self, capture: Capture, deadline: float | None) -> bool:
++        t0 = time.monotonic()
++        try:
++            written, nbytes = self._write(capture, deadline)
++        except Exception as e:
++            reason = str(e) if isinstance(e, PersistError) else f"{type(e).__name__}: {e}"
++            if isinstance(e, _Aborted):
++                self.log(f"[persist] save abandoned ({reason}); previous state kept")
++            else:
++                self.enabled = False
++                self.log(f"[persist] save failed ({reason}); persistence disabled")
++            return False
++        skipped = {k: v for k, v in capture.skipped.items() if v}
++        self.log(
++            f"[persist] saved serial={self._serial} pages={len(capture.pages)} stashes={len(capture.stashes)} "
++            f"new_blobs={written} bytes={nbytes} capture={capture.seconds:.2f} s write={time.monotonic() - t0:.2f} s"
++            + (f" skipped={skipped}" if skipped else "")
++        )
++        return True
++
++
++    def _check_deadline(self, deadline: float | None) -> None:
++        if self._abort.is_set():
++            raise _Aborted("abort requested")
++        if deadline is not None and time.monotonic() > deadline:
++            raise _Aborted("deadline reached")
++
++
++    def _write(self, capture: Capture, deadline: float | None) -> tuple[int, int]:
++        new = [it for it in capture.pages + capture.stashes if it.parts is not None]
++        results = []
++        written = [0, 0]
++        count_lock = threading.Lock()
++
++        def put(it: _Item):
++            self._check_deadline(deadline)
++            hasher = hashlib.sha256(it.header)
++            for part in it.parts:
++                hasher.update(part)
++            sha = hasher.hexdigest()
++            if it.sha is not None and sha != it.sha:
++                raise PersistError(f"clean {it.kind} changed without a write epoch bump")
++            name = f"{sha}.{'pg' if it.kind == 'page' else 'st'}"
++            if not os.path.lexists(os.path.join(self.blobs, name)):
++                _write_atomic(self.blobs, name, [it.header] + it.parts)
++                with count_lock:
++                    written[0] += 1
++                    written[1] += len(it.header) + sum(len(p) for p in it.parts)
++            it.sha = sha
++
++        with ThreadPoolExecutor(WRITER_THREADS) as pool:
++            for f in [pool.submit(put, it) for it in new]:
++                f.result()
++        self._check_deadline(deadline)
++        _fsync_dir(self.blobs)
++
++        body = dict(capture.body)
++        body["serial"] = self._serial + 1
++        body["pages"] = [
++            [h.hex(), _hex(prev), access, it.sha] for (h, prev, access), it in zip(body.pop("_pages"), capture.pages)
++        ]
++        body["stashes"] = [
++            [h.hex(), position, size, it.sha] for (h, position, size), it in zip(body.pop("_stashes"), capture.stashes)
++        ]
++        data = MANIFEST_MAGIC + json.dumps(body, sort_keys = True, separators = (",", ":")).encode() + b"\n"
++        data += hashlib.sha256(data).hexdigest().encode() + b"\n"
++        self._check_deadline(deadline)
++        _write_atomic(self.dir, "MANIFEST", [data])
++        _fsync_dir(self.dir)
++        self._serial += 1
++
++        live = frozenset(it.sha for it in capture.pages + capture.stashes)
++        self._gc(live)
++        for it in new:
++            results.append((it.kind, it, it.sha))
++        results.append(("live", live, None))
++        with self._lock:
++            self._results += results
++        return written[0], written[1]
++
++
++    def _gc(self, live: frozenset) -> None:
++        for name in os.listdir(self.blobs):
++            m = BLOB_NAME.fullmatch(name)
++            if m is None or m.group(1) not in live:
++                os.unlink(os.path.join(self.blobs, name))
++
++
++    def verify(self) -> tuple[int, int]:
++        """
++        Debug: re-read every saved page from the caches (and checkpoint from host memory) and re-hash it against
++        its blob digest. Returns (checked, mismatched); run on the generator thread while idle.
++        """
++        self._apply_results()
++        cap = self.capture(verify = True)
++        if cap is None:
++            return 0, 0
++        checked = mismatched = 0
++        for it in cap.pages + cap.stashes:
++            if it.sha is None:
++                continue
++            parts = it.parts
++            if parts is None:
++                continue
++            hasher = hashlib.sha256(it.header)
++            for part in parts:
++                hasher.update(part)
++            checked += 1
++            mismatched += hasher.hexdigest() != it.sha
++        return checked, mismatched
++
++
++    def close(self) -> None:
++        if self.lock_fd is not None:
++            os.close(self.lock_fd)
++            self.lock_fd = None
++
++
++class _Aborted(PersistError):
++    pass
++
++
++def _numel(shape) -> int:
++    n = 1
++    for s in shape:
++        n *= s
++    return n
++
++
++def _itemsize(dtype: torch.dtype) -> int:
++    return torch.empty((), dtype = dtype).element_size()
++
++
++def _page_header(key: bytes, phash: bytes, prev: bytes | None, payload: int) -> bytes:
++    h = _PAGE_HEADER.pack(PAGE_MAGIC, FORMAT, key, phash, prev or bytes(16), prev is not None, payload)
++    return h + bytes(HEADER_SIZE - len(h))
++
++
++def _stash_header(key: bytes, phash: bytes, position: int, size: int, nlayers: int, payload: int) -> bytes:
++    h = _STASH_HEADER.pack(STASH_MAGIC, FORMAT, key, phash, position, size, nlayers, payload)
++    return h + bytes(HEADER_SIZE - len(h))

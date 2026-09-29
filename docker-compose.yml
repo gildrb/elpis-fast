@@ -21,6 +21,11 @@ services:
     environment:
       # Explicit acknowledgment, not a claim of capacity, quality or performance.
       QWEN_ALLOW_UNQUALIFIED: ${QWEN_ALLOW_UNQUALIFIED:-0}
+      # Persistent prefix cache (/prefix-cache below): 0 turns it off. The cache is bound to the
+      # image ID, taken from the guardian launch gate or, for this plain launch, QWEN_IMAGE_ID
+      # (the full sha256 of QWEN_IMAGE); without either it stays off.
+      QWEN_PREFIX_PERSIST: ${QWEN_PREFIX_PERSIST:-1}
+      QWEN_IMAGE_ID: ${QWEN_IMAGE_ID:-}
     healthcheck:
       test: [CMD, /opt/venv/bin/python, -B, /opt/qwen/serve/healthcheck.py]
       interval: 30s
@@ -48,6 +53,13 @@ services:
       - type: bind
         source: ${QWEN_STATE_ROOT:?Set QWEN_STATE_ROOT to the existing model state directory}/cache
         target: /cache
+        bind:
+          create_host_path: false
+      # Operator-owned, mode 0700; holds K/V derived from prompts. Never mount it in research,
+      # candidate or lane containers.
+      - type: bind
+        source: ${QWEN_STATE_ROOT:?Set QWEN_STATE_ROOT to the existing model state directory}/prefix-cache
+        target: /prefix-cache
         bind:
           create_host_path: false
     deploy:

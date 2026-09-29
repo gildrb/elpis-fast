@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_sha256": "6d30690fdb76b3c4ad3fb5e69f0479707e410fc9b6194e2a5e32f4d7fe1fd8b3"
   },
-  "series_sha256": "afeb4aa59e693bd93589373e3fb26d02ab15520a6b8a78c4b859ecb9444ab3db",
+  "series_sha256": "84be696d5c43df37c3dea134515b7810c5651015b21f1d6cc874ad4aba025a58",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -177,6 +177,14 @@
     {
       "name": "3021c-prefill-pattn8-int8qk.patch",
       "sha256": "7088b1400c67d55d7a72feb38c38636e90cd07fa60bffa2815ac3ade70c56170"
+    },
+    {
+      "name": "5110g-prefill-m4096-guard.patch",
+      "sha256": "da1caaf5b9b48e163a2e5055d7205888bb78d37310491870745a893da79401f5"
+    },
+    {
+      "name": "9501b-prefix-persist.patch",
+      "sha256": "88be64623fac7fdc91a9b2c0d87dfd2a2a837aef24dba315628c663f45f51b02"
     }
   ],
   "files": {
@@ -426,7 +434,15 @@
     },
     "generator/job.py": {
       "pre": "4564b54b589fa045c9452f4e5e39cb304a090e06714f6f0d2428cbb261eab04b",
-      "post": "3518734c3e08016ec187f9d25808c3b4692f0bca176c80dff6213495b0fa0e24"
+      "post": "33b9bfec6affc2a9fed2f4ce7b8653eb681b569e23e4eb31d0f502c6934ba600"
+    },
+    "generator/pagetable.py": {
+      "pre": "0cde876b9969df7120ed7137b35bff3040dc3a7613c9f5a9547e58da4a9849ea",
+      "post": "b876c48c2cf6bd67e9035b5df67a9d6fee02db6febc67ce22d2b1959877e6ccd"
+    },
+    "generator/persist.py": {
+      "pre": null,
+      "post": "efab2124d6236b3b58d13c227695a7789f1eaf647b5aaddcdbe21e4bf14fd263"
     },
     "model/model.py": {
       "pre": "013edc062e64d8fad98695491dd3fd504723752377db7e8f338c88e5afb85448",
@@ -462,7 +478,7 @@
     },
     "modules/gated_delta_net.py": {
       "pre": "955f2ae25509ccf695dac4b79721115bc51d9d63a7f6f1eeb0a42671b685cf5a",
-      "post": "4c6ffc9816b5b30ceff1be2793ee5433e48fc51e6c862c1e0449c63d8e6b0deb"
+      "post": "9406854360bba686f16eb4a9a874bd909b87ec5ff90ff5951619f808bc28f24f"
     },
     "modules/gated_delta_net_fn/conv1d.py": {
       "pre": "a08e99093b0d76e33cf256931ad027b019404caf7b92ffd07b2d84b8187c0452",

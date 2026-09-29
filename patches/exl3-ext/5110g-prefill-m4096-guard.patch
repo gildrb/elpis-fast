@@ -1,0 +1,90 @@
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -16,7 +16,25 @@
+ from ..tokenizer import MMEmbedding
+ from functools import lru_cache
+ from ..util import profile_opt
++import os
++
++
++# Ext 5110g: merged 4096-row prefill forwards only for prompts of at most 131072 prefilled tokens. At 262K the merged
++# run's first verify round exceeded the card (0080g4 / 0080g5: 23.17 GiB allocated, OOM; 131073 tokens peaked at
++# 22.36 GiB either way); longer prompts keep the 2048-row schedule, so their memory and outputs are unchanged
++M4096_MAX_PROMPT = 131072
+ 
++
++def prefill_m4096_enabled() -> bool:
++    """Ext 5110 kill switch EXL3_PREFILL_M4096: unset or "1" = on, "0" = off, anything else is an error
++    (read per chunk, so one process can A/B it)."""
++    env = os.environ.get("EXL3_PREFILL_M4096")
++    if env is None or env == "1":
++        return True
++    if env == "0":
++        return False
++    raise ValueError("EXL3_PREFILL_M4096 must be 0 or 1")
++
+ # Convert list of strings to UTF32 format to pass by reference to partial matching function
+ @lru_cache(100)
+ def _strings_to_utf32(strings: tuple[str]) -> tuple[np.ndarray, np.ndarray] | None:
+@@ -1257,6 +1275,42 @@
+             if prefill_end <= prefill_start:
+                 continue
+ 
++            # Ext 5110 (m4096): run two consecutive full pieces of the max_chunk_size schedule as one forward. Only a
++            # piece that starts at a 2 * max_chunk_size boundary with no cached page skipped, is full, is followed by
++            # another full piece with no cached page, and ends at least 2 * max_chunk_size before the last prompt
++            # token is extended; the prompt's partition into rows is otherwise unchanged (tail pieces, the last page
++            # cut, cached-page skips and the fine recurrent checkpoint window at the end all keep their 2048 pieces).
++            # Every per-row / per-element kernel of a prefill forward treats the merged rows exactly as in two calls
++            # (the GDN b/a GEMM is split back into max_chunk_size rows, gated_delta_net.py), so the prefill state and
++            # outputs are bit-identical; EXL3_PREFILL_M4096=0 restores one forward per piece.
++            mc = self.generator.max_chunk_size
++            last_tok = len(seq.sequence_ids) - 1
++            if (
++                self.recurrent_state is not None and not self.embeddings and prefill_m4096_enabled() and
++                last_tok <= M4096_MAX_PROMPT and
++                prefill_start == seq.kv_position and prefill_start % (2 * mc) == 0 and
++                prefill_end - prefill_start == mc and prefill_end + mc <= last_tok - 2 * mc and mc % PAGE_SIZE == 0
++            ):
++                e2 = prefill_end + mc
++                merge = True
++                for local_idx in range(prefill_end // PAGE_SIZE, e2 // PAGE_SIZE):
++                    if 0 <= cp_pos <= seq.kv_position:
++                        break
++                    if seq.allocated_pages[local_idx].kv_position == PAGE_SIZE:
++                        merge = False
++                        break
++                if merge:
++                    prefill_end = e2
++                    p1 = (prefill_end + PAGE_SIZE - 1) // PAGE_SIZE
++                    self.m4096_merged = True
++            # The merged forwards leave 4096-row activation blocks in the caching allocator; at 262K context that
++            # reserve plus the first verify round's allocations exceeded the card (0080g4: OOM right after prefill
++            # with 22.39 GiB reserved). Once the schedule falls back to single pieces (the last 2 * max_chunk_size
++            # tokens always do), return the cached blocks to the driver once. Memory bookkeeping only: no numerics
++            if prefill_end - prefill_start <= mc and getattr(self, "m4096_merged", False):
++                self.m4096_merged = False
++                torch.cuda.empty_cache()
++
+             assert prefill_start % PAGE_SIZE == 0 or mm_exact_chunks
+             prefill_ids = seq.sequence_ids.torch_slice(prefill_start, prefill_end)
+ 
+--- a/modules/gated_delta_net.py
++++ b/modules/gated_delta_net.py
+@@ -1263,8 +1263,14 @@
+                 qkv = self.qkv_proj.forward(x, params)
+                 z = self.z_proj.forward(x, params)
+             z = z.view(bsz, seqlen, self.num_v_heads, self.v_head_dim)
+-            b = self.b_proj.forward(x, params)
+-            a = self.a_proj.forward(x, params)
++            if bsz == 1 and seqlen > 2048:
++                # Ext 5110: the unquantized b/a projections run on cuBLAS, whose algorithm depends on M; a merged
++                # 4096-row prefill forward (generator/job.py) keeps the served 2048-row calls for them
++                b = torch.cat([self.b_proj.forward(x[:, i:i + 2048], params) for i in range(0, seqlen, 2048)], 1)
++                a = torch.cat([self.a_proj.forward(x[:, i:i + 2048], params) for i in range(0, seqlen, 2048)], 1)
++            else:
++                b = self.b_proj.forward(x, params)
++                a = self.a_proj.forward(x, params)
+ 
+             # Ext 5111: long single-sequence prefill chunks go through conv1d_prefill_qkv (reads the fp32 qkv, writes
+             # contiguous q / k / v; bit-identical, no transpose / cast / split copies). EXL3_GDN_PREFILL_FUSE=0 disables

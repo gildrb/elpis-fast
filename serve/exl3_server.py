@@ -4,18 +4,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import math
 import os
 import queue
 import re
+import signal
 import stat
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar, override
 
 from jinja2 import TemplateError
@@ -27,6 +30,7 @@ from referencing.jsonschema import DRAFT202012
 
 if TYPE_CHECKING:
     import torch
+    from exllamav3.generator.persist import PrefixStore
     from jsonschema.protocols import Validator
 
 type JSON = str | int | float | bool | list[JSON] | dict[str, JSON] | None
@@ -70,6 +74,17 @@ SCHEMA_SINGLE = {
 }
 SCHEMA_ARRAYS = {"allOf", "anyOf", "oneOf", "prefixItems"}
 FORMAT_CHECKER = FormatChecker()
+# Persistent prefix cache (engine generator/persist.py). Saved on SIGTERM and after 30 s idle, at most every 5 min.
+PERSIST_ENV = "QWEN_PREFIX_PERSIST"
+PERSIST_IDLE_SECONDS = 30
+PERSIST_INTERVAL_SECONDS = 300
+# Stop budget from SIGTERM to exit, inside the guardian's 45 s and Compose's 60 s grace.
+STOP_BUDGET_SECONDS = 40
+IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+LAUNCH_GATE = "/maintenance-control/launch-gate.py"
+ENGINE_MANIFEST = "/opt/qwen/exl3-patches.json"
+MODEL_MANIFEST = "/model-preparation/exl3-manifest.json"
+BINDING_ENV_PREFIXES = ("EXL3_", "QWEN_", "CUDA_", "PYTORCH_", "TORCH_", "NVIDIA_")
 
 
 class APIError(Exception):
@@ -982,6 +997,127 @@ class Pending:
     error: Exception | None = None
 
 
+class ShuttingDown(Exception):
+    """The job was cancelled, or never started, because the server is stopping."""
+
+
+def env_flag(name: str, default: bool) -> bool:
+    """Read a strict 0/1 environment switch.
+
+    Raises:
+        ValueError: The variable holds anything but 0 or 1.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value not in ("0", "1"):
+        raise ValueError(f"{name} must be 0 or 1")
+    return value == "1"
+
+
+def env_seconds(name: str, default: int) -> int:
+    """Read a strict whole-second duration (test hook for the save schedule).
+
+    Raises:
+        ValueError: The variable is not an integer in 0..86400.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if not value.isdigit() or int(value) > 86400:
+        raise ValueError(f"{name} must be whole seconds in 0..86400")
+    return int(value)
+
+
+def launch_image() -> str | None:
+    """Identify the running image without trusting request data.
+
+    The guardian's launch gate is the container entrypoint and receives the verified image
+    ID as --candidate-image; docker-init (PID 1) keeps that argv. QWEN_IMAGE_ID serves
+    launches without the gate and must agree with the gate when both exist.
+
+    Returns:
+        The full image ID, or None when it is unknown or contradictory.
+    """
+    gate = None
+    try:
+        with open("/proc/1/cmdline", "rb") as source:
+            argv = [a.decode() for a in source.read().split(b"\0")]
+    except (OSError, UnicodeDecodeError):
+        argv = []
+    if LAUNCH_GATE in argv and "--candidate-image" in argv:
+        at = argv.index("--candidate-image") + 1
+        gate = argv[at] if at < len(argv) and IMAGE_ID.fullmatch(argv[at]) else None
+        if gate is None:
+            return None
+    env = os.environ.get("QWEN_IMAGE_ID") or None
+    if env is not None and IMAGE_ID.fullmatch(env) is None:
+        return None
+    if gate is not None and env is not None and gate != env:
+        return None
+    return gate or env
+
+
+def file_digest(path: str) -> str | None:
+    """Hash one file, or None if it does not exist."""
+    try:
+        with open(path, "rb") as source:
+            return hashlib.file_digest(source, "sha256").hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def prefix_binding(args: argparse.Namespace, torch_: ModuleType) -> dict[str, JSON] | None:
+    """Everything outside the cache geometry that persisted K/V and recurrent bytes depend on.
+
+    Returns:
+        The JSON binding, or None when the image cannot be identified.
+    """
+    image = launch_image()
+    if image is None:
+        return None
+    try:
+        with open("/proc/driver/nvidia/version", encoding="utf-8") as source:
+            driver = source.readline().strip()
+    except OSError:
+        driver = None
+    return {
+        "image": image,
+        "files": {
+            path: file_digest(path)
+            for path in (
+                ENGINE_MANIFEST,
+                MODEL_MANIFEST,
+                os.path.abspath(__file__),
+                os.path.join(args.target, "config.json"),
+                os.path.join(args.draft, "config.json"),
+            )
+        },
+        "args": {
+            "target": args.target,
+            "draft": args.draft,
+            "model_name": args.model_name,
+            "max_model_len": args.max_model_len,
+            "cache_tokens": args.cache_tokens,
+            "cq": args.cq,
+        },
+        "runtime": {
+            "torch": str(torch_.__version__),
+            "cuda": str(torch_.version.cuda),
+            "gpu": str(torch_.cuda.get_device_name(0)),
+            "capability": list(torch_.cuda.get_device_capability(0)),
+            "driver": driver,
+        },
+        "env": {
+            name: value
+            for name, value in sorted(os.environ.items())
+            if name.startswith(BINDING_ENV_PREFIXES)
+            and not name.startswith(PERSIST_ENV)
+            and name != "QWEN_IMAGE_ID"
+        },
+    }
+
+
 class Server:
     """Own the fixed native EXL3/DFlash2 stack and its single generation worker."""
 
@@ -1065,8 +1201,21 @@ class Server:
         ):
             self.stop_ids.append(self.tokenizer.eos_token_id)
         self.tokenizer_lock = threading.Lock()
-        self.queue: queue.Queue[Pending] = queue.Queue()
+        # None is the stop sentinel queued by begin_shutdown.
+        self.queue: queue.Queue[Pending | None] = queue.Queue()
         self.failure: Exception | None = None
+        self.stopping = threading.Event()
+        self.stopped = threading.Event()
+        self.stop_deadline = math.inf
+        self.persist_debug = env_flag("QWEN_PREFIX_PERSIST_DEBUG", False)
+        self.persist_idle = env_seconds("QWEN_PREFIX_PERSIST_IDLE_SECONDS", PERSIST_IDLE_SECONDS)
+        self.persist_interval = env_seconds(
+            "QWEN_PREFIX_PERSIST_INTERVAL_SECONDS", PERSIST_INTERVAL_SECONDS
+        )
+        self.persist_dirty = False
+        self.last_job_end = -math.inf
+        self.last_save = -math.inf
+        self.persist = self.open_prefix_cache(args) if args.prefix_cache else None
         threading.Thread(target=self._worker, daemon=True).start()
         free, total = torch.cuda.mem_get_info()
         print(
@@ -1124,12 +1273,16 @@ class Server:
             RuntimeError: The worker signals completion without a result.
         """
         self.check_context(ids, options.max_tokens)
+        if self.stopping.is_set():
+            raise APIError("Server is shutting down", 503, "server_shutting_down")
         pending = Pending(ids, options)
         self.queue.put(pending)
         if not pending.event.wait(timeout=7200):
             raise APIError(
                 "Generation timed out after 7200 seconds", 504, "generation_timeout"
             )
+        if isinstance(pending.error, ShuttingDown):
+            raise APIError("Server is shutting down", 503, "server_shutting_down")
         if pending.error is not None:
             raise APIError(
                 "Native generation failed; inspect server logs",
@@ -1140,9 +1293,129 @@ class Server:
             raise RuntimeError("Native worker completed without a result")
         return pending.result
 
+    def open_prefix_cache(self, args: argparse.Namespace) -> PrefixStore | None:
+        """Open and restore the persistent prefix cache; any problem means running without it.
+
+        Returns:
+            The engine's PrefixStore, or None when persistence is off or unusable.
+        """
+        if not env_flag(PERSIST_ENV, True):
+            print(f"[persist] disabled by {PERSIST_ENV}=0", flush=True)
+            return None
+        from exllamav3.generator.persist import PersistError, PrefixStore
+
+        binding = prefix_binding(args, self.torch)
+        if binding is None:
+            print(
+                "[persist] image identity unknown (launch gate --candidate-image or "
+                "QWEN_IMAGE_ID); persistence disabled",
+                flush=True,
+            )
+            return None
+        try:
+            store = PrefixStore(
+                args.prefix_cache, binding, self.gen, log=lambda m: print(m, flush=True)
+            )
+        except (PersistError, OSError) as exc:
+            print(f"[persist] disabled: {exc}", flush=True)
+            return None
+        print(f"[persist] binding {store.key}", flush=True)
+        # Test hooks: a permuted physical placement, and a re-read of every restored page
+        permute = os.environ.get("QWEN_PREFIX_PERSIST_DEBUG_PERMUTE")
+        if permute is not None and not permute.isdigit():
+            raise ValueError("QWEN_PREFIX_PERSIST_DEBUG_PERMUTE must be a non-negative integer")
+        stats = store.restore(permute_seed=None if permute is None else int(permute))
+        if self.persist_debug and stats.get("restored"):
+            checked, mismatched = store.verify()
+            print(f"[persist] verify checked={checked} mismatched={mismatched}", flush=True)
+            if mismatched:
+                store.enabled = False
+        return store if store.enabled else None
+
+    def begin_shutdown(self, deadline: float) -> None:
+        """Stop taking jobs, cancel the running one, then save and let the worker exit."""
+        self.stop_deadline = deadline
+        self.stopping.set()
+        self.queue.put(None)
+
+    def wait_stopped(self) -> None:
+        """Wait for the worker's final save, bounded by the stop budget."""
+        _ = self.stopped.wait(max(0.0, self.stop_deadline - time.monotonic()) + 1)
+
+    def _save_due(self) -> float | None:
+        """Seconds until the next idle save, or None if none is pending."""
+        store = self.persist
+        if store is None or not store.enabled or not self.persist_dirty or self.failure:
+            return None
+        due = max(
+            self.last_job_end + self.persist_idle, self.last_save + self.persist_interval
+        )
+        return max(0.0, due - time.monotonic())
+
+    def _save(self, final: bool) -> None:
+        """Capture the prefix cache on this (generator) thread and write it.
+
+        Idle saves write in the background; the final save writes here, bounded by
+        the stop deadline. Persistence errors disable persistence, never a request.
+        """
+        store = self.persist
+        if store is None or not store.enabled or self.failure is not None:
+            return
+        if final:
+            if not store.wait(max(0.0, self.stop_deadline - time.monotonic())):
+                store.abort()
+                print("[persist] final save skipped: earlier save still running", flush=True)
+                return
+            if not self.persist_dirty:
+                return
+        self.last_save = time.monotonic()
+        try:
+            capture = store.capture(verify=self.persist_debug)
+        except Exception as exc:
+            store.enabled = False
+            print(f"[persist] capture failed ({type(exc).__name__}); persistence disabled", flush=True)
+            return
+        if capture is None:
+            # Writer still busy: retry shortly instead of a whole interval later
+            self.last_save -= max(0, self.persist_interval - 1)
+            return
+        self.persist_dirty = False
+        if final:
+            _ = store.save(capture, background=False, deadline=self.stop_deadline)
+        else:
+            _ = store.save(capture)
+
+    def _next_pending(self) -> Pending | None:
+        """The next job to run, running idle saves while waiting; None once stopping."""
+        while True:
+            try:
+                pending = self.queue.get(timeout=self._save_due())
+            except queue.Empty:
+                self._save(final=False)
+                continue
+            if pending is not None and not self.stopping.is_set():
+                return pending
+            if pending is not None:
+                pending.error = ShuttingDown()
+                pending.event.set()
+            self.queue.task_done()
+            if pending is None:
+                # Fail whatever raced in behind the stop sentinel
+                while True:
+                    try:
+                        late = self.queue.get_nowait()
+                    except queue.Empty:
+                        return None
+                    if late is not None:
+                        late.error = ShuttingDown()
+                        late.event.set()
+                    self.queue.task_done()
+
     def _worker(self) -> None:
         while True:
-            pending = self.queue.get()
+            pending = self._next_pending()
+            if pending is None:
+                break
             try:
                 if self.failure is not None:
                     raise RuntimeError(
@@ -1168,6 +1441,9 @@ class Server:
                 self.gen.enqueue(job)
                 final = None
                 while self.gen.num_remaining_jobs():
+                    if self.stopping.is_set():
+                        self.gen.cancel(job)
+                        raise ShuttingDown()
                     for event in self.gen.iterate():
                         if event.get("identifier") == pending.identifier and event.get(
                             "eos"
@@ -1209,6 +1485,13 @@ class Server:
                     raise RuntimeError(
                         "Tree verify rounds disagree with the EXL3_TREE configuration"
                     )
+                if self.persist_debug:
+                    print(
+                        f"[persist] job prompt_tokens={prompt_tokens} "
+                        f"cached_pages={final.get('cached_pages')} "
+                        f"cached_tokens={final.get('cached_tokens')}",
+                        flush=True,
+                    )
                 pending.result = Result(
                     text,
                     prompt_tokens,
@@ -1217,6 +1500,8 @@ class Server:
                     spec_rounds,
                     spec_committed,
                 )
+            except ShuttingDown as exc:
+                pending.error = exc
             except Exception as exc:
                 self.failure = exc
                 pending.error = exc
@@ -1226,6 +1511,10 @@ class Server:
             finally:
                 pending.event.set()
                 self.queue.task_done()
+                self.persist_dirty = True
+                self.last_job_end = time.monotonic()
+        self._save(final=True)
+        self.stopped.set()
 
 
 def load_authorization(path: str = "/app/api_key.txt") -> str:
@@ -1629,6 +1918,11 @@ def main() -> None:
     parser.add_argument("--cq", type=int, default=3)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8889)
+    parser.add_argument(
+        "--prefix-cache",
+        default=None,
+        help="private directory for the persistent prefix cache (off when omitted)",
+    )
     args = parser.parse_args()
     if (
         args.max_model_len != CONTEXT
@@ -1645,6 +1939,17 @@ def main() -> None:
     Handler.engine = Server(args)
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
+    stopping = threading.Event()
+
+    def on_sigterm(_signum: int, _frame: object) -> None:
+        # Docker stop: finish at the next generator step, save the prefix cache, exit 0.
+        if stopping.is_set():
+            return
+        stopping.set()
+        Handler.engine.begin_shutdown(time.monotonic() + STOP_BUDGET_SECONDS)
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    _ = signal.signal(signal.SIGTERM, on_sigterm)
     print(
         f"[serve] listening on http://{args.host}:{args.port}; SSE transport is buffered",
         flush=True,
@@ -1655,6 +1960,9 @@ def main() -> None:
         pass
     finally:
         httpd.server_close()
+    if stopping.is_set():
+        Handler.engine.wait_stopped()
+        print("[serve] stopped", flush=True)
 
 
 if __name__ == "__main__":
