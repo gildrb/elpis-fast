@@ -3,7 +3,7 @@
 
   python3 exl3_bend_accept.py DIRECTORY     # full admission, exit 0 on success
 
-The directory holds libexl3_accept.so (unchanged Bend 2.0.29 emitted C of
+The directory holds libexl3_accept.so (unchanged Bend 2.0.34 emitted C of
 bend/EXL3_ACCEPT.bend plus bend/exl3_accept_glue.c), the canonical table
 printed by the Bend reference program bend/EXL3_ACCEPT_SPEC.bend, this file and
 identity.json, beside the four tree acceptor files (exl3_bend_tree_accept.py).

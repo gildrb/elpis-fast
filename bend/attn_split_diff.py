@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "bend/ATTN_SPLIT_TABLE.bend"
 LS = [1, 8, 63, 64, 65, 115, 127, 128, 129, 256, 257, 1000, 1288, 2056, 4104, 8198, 12808, 18608, 32736]
 SS = [1, 2, 3, 7, 20, 40, 82]

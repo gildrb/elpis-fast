@@ -57,7 +57,7 @@ PATCH_CANDIDATES = [REPO / "patches/exl3-ext" / PATCH_NAME,
                     Path("/tmp/kernel-work/DraftProj/q4p/pins_elpis/patches/exl3-ext") / PATCH_NAME]
 PATCH_SHA256 = "e7a2952ff6485c74d8b443fdeb751b9961f2c834b60b0d2940af6e77b7ce4db9"
 ORDER_JSON = Path("/tmp/kernel-work/DraftProj/q4p/block_order_code.json")
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "DRAFT_HEAD_IDMAP_TABLE.bend"
 IMPL = "draft_head_idmap.bend"
 PROOF = "draft_head_idmap_proof.bend"

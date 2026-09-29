@@ -573,8 +573,8 @@ def ne_add(+r: Nat, +mp: Nat)
 
 def go_step(+n: Nat, +m: Nat, +d: Nat, +r: Nat, +bp: Nat,
     inv: {Nat.add(m, r) == bp : Nat})
-  -> {Nat.mod.fin(Nat.divmod.go(1n+n, m, d, r)) ==
-    wrap(1n+Nat.mod.fin(Nat.divmod.go(n, m, d, r)), bp) : Nat}:
+  -> {Pair.snd(Nat, Nat, Nat.divmod.go(1n+n, m, d, r)) ==
+    wrap(1n+Pair.snd(Nat, Nat, Nat.divmod.go(n, m, d, r)), bp) : Nat}:
   match n m:
     case 0n 0n:
       %inv : {0n == wrap(1n+r, _) : Nat}

@@ -26,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "bend/M16_WSCHED_TABLE.bend"
 DEFAULT_REFERENCE = "/tmp/kernel-work/TailV2b/gen_sched.py"
 G, BF, NP, PFLD, TBF, HDR = 164, 11, 34, 5, 4, 8

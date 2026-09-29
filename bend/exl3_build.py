@@ -4,12 +4,12 @@
   nix develop --offline --no-write-lock-file -c \\
     python3 bend/exl3_build.py --output build/bend-exl3
 
-Uses the flake-pinned bend 2.0.29 and clang 19.1.7 from the dev shell PATH.
+Uses the flake-pinned bend 2.0.34 and clang 19.1.7 from the dev shell PATH.
 The root holds two artifacts: the chain acceptor (bend/EXL3_ACCEPT.bend,
 libexl3_accept.so, identity.json) and the tree acceptor
 (bend/EXL3_TREE_ACCEPT.bend, libexl3_tree_accept.so, tree_identity.json).
 Steps, each fail-closed: the proof gates (bend/exl3_accept_proof.bend and
-bend/exl3_tree_accept_gate.bend print exactly "All terms check."); C emission
+bend/exl3_tree_accept_gate.bend print exactly bend's pass verdict, VERDICT); C emission
 of each production program and its reference checker; both compiled and run,
 their tables byte-identical and equal to the loader's pinned reference table;
 admission of the emitted scalar leaves (unique signature and output arity,
@@ -34,9 +34,12 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND_VERSION = "bend 2.0.29\n"
+BEND_VERSION = "bend 2.0.34\n"
 CLANG_VERSION = "clang version 19.1.7"
 PROOFS = ("bend/exl3_accept_proof.bend", "bend/exl3_tree_accept_gate.bend")
+# bend 2.0.34 bend2/main.ts cli_verdict: PASS plus the --verdict hint, on stdout. It prints
+# PASS only when every def checks and none relies on @unsafe or foreign code, imports included.
+VERDICT = "ALL PROOFS CHECK\nUse --verdict for mathematical validity.\n"
 SOURCES = (
     "bend/exl3_accept.bend",
     "bend/exl3_accept_spec.bend",
@@ -103,8 +106,10 @@ SIGNATURE = re.compile(
 TOKEN = re.compile(
     r"\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+(?:ull)?|==|!=|>=|<=|[-+*|&=<>;,()\[\]{}])"
 )
+# u64 is a scalar type name only: bend 2.0.34 emits a U32 register copied into a Term (u64) slot
+# as the explicit widening cast ((u64)x), which bend 2.0.29 left implicit (same C conversion).
 KEYWORDS = frozenset(
-    {"INLINE", "FAR", "Term", "Env", "THR", "e", "o", "u32", "wpoll", "WL_SPIN", "WL_AGAIN", "U32_BIN", "TAB_AT"}
+    {"INLINE", "FAR", "Term", "Env", "THR", "e", "o", "u32", "u64", "wpoll", "WL_SPIN", "WL_AGAIN", "U32_BIN", "TAB_AT"}
     | {"if", "else", "return", "break"}
 )
 LOCAL = re.compile(r"_[A-Za-z0-9_]*_(?:0|[1-9][0-9]*)|r(?:0|[1-9][0-9]*)")
@@ -390,7 +395,7 @@ def main(arguments: list[str]) -> int:
     clang = resolve("clang")
     bend_environment = {**os.environ, "BEND_NO_TELEMETRY": "1"}
     if run([str(bend), "version"], REPO, bend_environment) != BEND_VERSION:
-        raise fail("requires exactly bend 2.0.29")
+        raise fail("requires exactly bend 2.0.34")
     clang_version = run([str(clang), "--version"], REPO, compile_environment(clang, {}))
     if not clang_version.startswith(CLANG_VERSION + "\n"):
         raise fail("requires exactly clang 19.1.7")
@@ -403,8 +408,8 @@ def main(arguments: list[str]) -> int:
         ):
             raise fail(f"{name} contains an unsafe definition or an open hole")
     for proof in PROOFS:
-        if run([str(bend), str(REPO / proof)], REPO, bend_environment) != "All terms check.\n":
-            raise fail(f"proof gate {proof} did not report exactly 'All terms check.'")
+        if run([str(bend), str(REPO / proof)], REPO, bend_environment) != VERDICT:
+            raise fail(f"proof gate {proof} did not report exactly {VERDICT!r}")
 
     with tempfile.TemporaryDirectory(prefix="exl3-bend-build-") as scratch:
         work = Path(scratch)

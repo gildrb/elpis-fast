@@ -36,7 +36,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "bend/GEMM_M16_GROUP_TABLE.bend"
 # The shipped 2102: 2102-proj-m16-grouped-v2-on3003-5101.patch (hunk positions rebased onto 3003 +
 # 5101; its new kernel/host files are byte-identical to 2102 v2 50f75e69...)

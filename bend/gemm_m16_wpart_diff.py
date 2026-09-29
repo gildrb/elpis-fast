@@ -39,7 +39,7 @@ HERE = Path(__file__).resolve().parent
 REPO = Path("/home/gilrodrigues/Repos/elpis")
 TREE_DEFAULT = Path("/tmp/kernel-work/WpartBend2/tree")
 PATCH = REPO / "patches/exl3-ext/2105-proj-m16g-weighted-on9003b.patch"
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "GEMM_M16_WPART_TABLE.bend"
 IMPL = "gemm_m16_wpart.bend"
 # the Bend sources compile from the dev dir (repo bend/*.bend + links to ours) when present

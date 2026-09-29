@@ -819,7 +819,7 @@ def ard_shuffle(+x: Nat, -y: Nat, +z: Nat, +n: Nat, e: {z == y : Nat})
 # Invariant of Nat.divmod.go with divisor b = 1 + bp: when r + m == bp,
 # q * b + r2 == d * b + (r + n).
 def ard_go_eq(+n: Nat, +m: Nat, +d: Nat, +r: Nat, +bp: Nat, inv: {Nat.add(r, m) == bp : Nat})
-  -> {Nat.add(Nat.mul(Nat.div.fin(Nat.divmod.go(n, m, d, r)), 1n+bp), Nat.mod.fin(Nat.divmod.go(n, m, d, r))) == Nat.add(Nat.mul(d, 1n+bp), Nat.add(r, n)) : Nat}:
+  -> {Nat.add(Nat.mul(Pair.fst(Nat, Nat, Nat.divmod.go(n, m, d, r)), 1n+bp), Pair.snd(Nat, Nat, Nat.divmod.go(n, m, d, r))) == Nat.add(Nat.mul(d, 1n+bp), Nat.add(r, n)) : Nat}:
   match n:
     case 0n:
       %ar_add_zero_r(r) : {Nat.add(Nat.mul(d, 1n+bp), _) == Nat.add(Nat.mul(d, 1n+bp), Nat.add(r, 0n)) : Nat}
@@ -829,17 +829,17 @@ def ard_go_eq(+n: Nat, +m: Nat, +d: Nat, +r: Nat, +bp: Nat, inv: {Nat.add(r, m) 
         case 0n:
           +inv2 = Equal.trans(Nat, r, Nat.add(r, 0n), bp,
             Equal.sym(Nat, Nat.add(r, 0n), r, ar_add_zero_r(r)), inv)
-          %ard_shuffle(Nat.mul(d, 1n+bp), bp, r, np, inv2) : {Nat.add(Nat.mul(Nat.div.fin(Nat.divmod.go(np, r, 1n+d, 0n)), 1n+bp), Nat.mod.fin(Nat.divmod.go(np, r, 1n+d, 0n))) == _ : Nat}
+          %ard_shuffle(Nat.mul(d, 1n+bp), bp, r, np, inv2) : {Nat.add(Nat.mul(Pair.fst(Nat, Nat, Nat.divmod.go(np, r, 1n+d, 0n)), 1n+bp), Pair.snd(Nat, Nat, Nat.divmod.go(np, r, 1n+d, 0n))) == _ : Nat}
           ard_go_eq(np, r, 1n+d, 0n, bp, inv2)
         case 1n+mp:
-          %Equal.sym(Nat, Nat.add(r, 1n+np), 1n+Nat.add(r, np), ar_add_succ_r(r, np)) : {Nat.add(Nat.mul(Nat.div.fin(Nat.divmod.go(np, mp, d, 1n+r)), 1n+bp), Nat.mod.fin(Nat.divmod.go(np, mp, d, 1n+r))) == Nat.add(Nat.mul(d, 1n+bp), _) : Nat}
+          %Equal.sym(Nat, Nat.add(r, 1n+np), 1n+Nat.add(r, np), ar_add_succ_r(r, np)) : {Nat.add(Nat.mul(Pair.fst(Nat, Nat, Nat.divmod.go(np, mp, d, 1n+r)), 1n+bp), Pair.snd(Nat, Nat, Nat.divmod.go(np, mp, d, 1n+r))) == Nat.add(Nat.mul(d, 1n+bp), _) : Nat}
           ard_go_eq(np, mp, d, 1n+r, bp,
             Equal.trans(Nat, 1n+Nat.add(r, mp), Nat.add(r, 1n+mp), bp,
               Equal.sym(Nat, Nat.add(r, 1n+mp), 1n+Nat.add(r, mp), ar_add_succ_r(r, mp)), inv))
 
 # The remainder of Nat.divmod.go stays below b = 1 + bp.
 def ard_go_lt(+n: Nat, +m: Nat, +d: Nat, +r: Nat, +bp: Nat, inv: {Nat.add(r, m) == bp : Nat})
-  -> {Nat.is_lt(Nat.mod.fin(Nat.divmod.go(n, m, d, r)), 1n+bp) == True{} : Bool}:
+  -> {Nat.is_lt(Pair.snd(Nat, Nat, Nat.divmod.go(n, m, d, r)), 1n+bp) == True{} : Bool}:
   match n:
     case 0n:
       Equal.trans(Bool, Nat.is_lt(r, 1n+bp), Nat.is_le(r, bp), True{},

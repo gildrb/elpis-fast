@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "bend/GDN_REPLAY_TABLE.bend"
 DEFAULT_TREE = "/tmp/kernel-work/ReplayProof/tree"
 DEFAULT_RECURRENT_UTIL = "/tmp/kernel-work/DraftHead2/base_c/cache/recurrent_util.py"

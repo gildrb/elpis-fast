@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import NoReturn
 
 REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend"
+BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "bend/M16_DIET2_TABLE.bend"
 DEFAULT_TREE = "/tmp/kernel-work/M16gEff/whatif/c9pin.tree"
 DEFAULT_PATCH = "/tmp/kernel-work/M16gEff/whatif/2107-m16-decode-diet-on2106.patch"

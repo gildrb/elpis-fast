@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BEND = os.environ.get("BEND", "/nix/store/8inj4v2ng19vgmff7k73mvhddlpy25cc-bend-2.0.29/bin/bend")
+BEND = os.environ.get("BEND", "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend")
 EXT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/kernel-work/PrefillMap/gemm/pins.tree/exllamav3_ext")
 
 HDR_QUOTES = [

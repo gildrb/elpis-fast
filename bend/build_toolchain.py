@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the unmodified, pinned Bend 2.0.29 release checker and compiler.
+"""Package the unmodified, pinned Bend 2.0.34 release checker and compiler.
 
 The release ELF and resources stay byte-identical to upstream except for
 Nix ELF relocation. A small launcher supplies the OS and JavaScriptCore
@@ -19,19 +19,19 @@ from pathlib import Path
 from typing import Literal
 
 
-VERSION = "bend 2.0.29\n"
-RELEASE_URL = "https://github.com/bendlang/bend/releases/download/v2.0.29/bend-2.0.29-linux-x64.tar.gz"
-RELEASE_SHA256 = "e0ff4fa44581b42f6024d2a1128e7e518219a502cb726030c714a5c23d61726e"
-RUNTIME_SHA256 = "2aabe5cc340203fe3f873a41f2c67445c6734d24456cfa174e9efe2ee13dcea6"
-BASE_SHA256 = "22eea83911e2395f63594fea7c10ac0c1e5b548251681fc97cd7667e0eb7031b"
-SOURCE_COMMIT = "c8691aa93b0b1bb2fda277d9fc88c5aa797e88de"
+VERSION = "bend 2.0.34\n"
+RELEASE_URL = "https://github.com/bendlang/bend/releases/download/v2.0.34/bend-2.0.34-linux-x64.tar.gz"
+RELEASE_SHA256 = "78106a97af242429dcc057258eb8d10f69cddebcd5e263022185a52d003e09bf"
+RUNTIME_SHA256 = "7fafb749dd33df446a0cb5839c5694df237312a8e8048d2e9420480164ff5934"
+BASE_SHA256 = "c742fae9c49b14f0cc9128429a2c6109364c8a933a142f2c90b9f2e5fd976661"
+SOURCE_COMMIT = "7d8a3eb036042c6549461054d25a10f26d361c5c"
 SOURCE_URL = f"https://codeload.github.com/bendlang/bend/tar.gz/{SOURCE_COMMIT}"
-SOURCE_SHA256 = "1e5006bff6cdf9f03b2e60f33c45ed1d91fa9dbbd633466c9f22e48880f9351a"
+SOURCE_SHA256 = "2232ba4b9f66f5d3729e47417994952b484e8b5f44823a682c08bf68c51eaa00"
 UNMODIFIED_CHECKER_SHA256 = (
-    "09d2cc5c5d757f1a694dd126ccbac72ef2374cfe948d9d51c2b08247c5d2581e"
+    "de2b39db2fcbd2f9115053e85e34d791693e1297bfeb6874da1013ff7b44b7dd"
 )
-SOURCE_MAIN_SHA256 = "0a6c19ee942ec4fadcf7daaa69ca1cfd395a5ee8ef130df72b548291def93884"
-SOURCE_COMP_SHA256 = "0cf866b28ff273d47970b3c16e82288e9676ce9f0ea3fce49877a82ce4a6301b"
+SOURCE_MAIN_SHA256 = "e139cf21c6c925dc2a3f76185c8e2c3fd4c44aee3c9bc8eb2595bc069764500e"
+SOURCE_COMP_SHA256 = "eee1bfd161a948d1fbe2451526975bc44d237b60d6b469d740f9f702720e0bbb"
 WRAPPER_SHA256 = "437f2f10c027d4b1a68d86b08d372a0bc32786b2304b658b5d07eefb79de437d"
 COMPILER_NAMES = ("bin/bend", "bin/bend-runtime")
 LAUNCHER = """#!/bin/sh
@@ -130,7 +130,7 @@ def version(runner: Path) -> None:
     )
     require(
         result.stdout == VERSION.encode("utf-8") and result.stderr == b"",
-        "Packaged Bend is not the selected 2.0.29 release checker",
+        "Packaged Bend is not the selected 2.0.34 release checker",
     )
 
 
@@ -181,7 +181,7 @@ def record(
         {
             "schema": 6,
             "claim": (
-                "Pinned, unmodified Bend 2.0.29 release checker/compiler and "
+                "Pinned, unmodified Bend 2.0.34 release checker/compiler and "
                 "Base; launcher configures OS and JavaScriptCore stack limits; "
                 "matching upstream source is authenticated without patching"
             ),
