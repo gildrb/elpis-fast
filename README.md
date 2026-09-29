@@ -113,7 +113,7 @@ In short:
 |---|---|---|
 | The draft never changes the text | invariance gate (`cs10`): 15 prompts × normal / capped / all-rejected draft; not yet re-run on the int8-prefill stack (#73/#74) | 45/45 identical token ids |
 | Decode speedups since `cs10` never changed the text | lane 20 + C1 15 answers, `cs10` → `cs11` → `cs12` → `tree3s` | byte-identical |
-| Earlier kept speedups did change the text | decode 3003, 2102, 8202, 3006, 2105, 5106; prefill 3010 (P·V summed in fp16) | kept after numerics checks (2105: error vs fp32 no worse; 5106: error vs fp64 lower) |
+| Earlier kept speedups changed the arithmetic, so the text can differ | decode 3003, 2102, 8202, 3006, 2105, 5106, 8205b (split-K order); prefill 3010 (Q·Kᵀ and P·V summed in fp16 over 32-value spans) | accuracy recorded only for 2105 (vs fp32: no worse), 5106 (vs fp64: lower) and 3010 (teacher-forced KL below the chunk-size noise floor) |
 | Exact prefill patches 3020 / 5111 / 5112 never change the text | prefill suite, 9 rows: #71 and #72 vs #70 | byte-identical |
 | **Exception:** int8 prefill Q·Kᵀ (3021c, live since #73) changes the text | prefill suite, 9 rows: #73 vs #70 | first token 9/9 identical; 32-token continuations 4/9 differ after 22-52 characters |
 | Power and clocks never change the text | lane 20 + C1 15 answers, 250 W (#67) vs 350 W (#68); memory offsets 0 … −2000 (RoundBench ids) | byte-identical |

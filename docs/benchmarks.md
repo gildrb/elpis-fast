@@ -525,10 +525,10 @@ to keep DRAM busy. Replacing the trellis decode with a trivial one saves ~7 ms o
 helps (a 3.4 ms per-round sleep costs 1.9 ms; dropping the draft-id host sync, 0).
 
 **#58 (cs10).** On c0:
-- 8205b: weighted slot partition for the 8201/8202 kernels. Bit-exact.
+- 8205b: weighted slot partition for the 8201/8202 kernels. Not bit-exact (corrected 2026-09-29; this line said "Bit-exact"): the default non-uniform weights change the split-K summation order (8205b's own note); fp16 runs stay 64 values, slot sums fp32. Per that note, uniform weights (`EXL3_M16_WEIGHTED=0`) are 8204 bit for bit.
 - 9005c: pruned int4 draft head (896 of 1940 blocks, adaptive switch-back). Draft only;
   target text is draft-independent. `bend/draft_head_idmap*`.
-- 3010: CUDA prefill attention with fp16-accumulated PV. Numerics change: teacher-forced
+- 3010: CUDA prefill attention that sums Q·Kᵀ and P·V in fp16 over 32-value spans, flushed into fp32 (corrected 2026-09-29; this line said "fp16-accumulated PV"). Numerics change: teacher-forced
   KL below the chunk-size noise floor at 32K and 131K. At 250 W a 262136-token prompt
   prefills in 537 s instead of 722 s. Attention alone is 1.55-1.65× faster, under the
   pre-registered 1.8× bar; kept on the time-to-first-token result.
