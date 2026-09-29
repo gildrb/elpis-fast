@@ -1,6 +1,16 @@
-# elpis: Qwen3.8-27B on one RTX 3090 at 350 W, 262K context, lossless speculative decoding
+# elpis-fast: speed-first Qwen3.8-27B on one RTX 3090 at 350 W, 262K context
 
-**Qwen3.8-27B · EXL3 4.00 bpw · DFlash2 + 8-row token tree · 262,144 context · one RTX 3090 at 350 W, quiet fans · the draft never changes the output (acceptance proved in Bend) · prefill Q·Kᵀ runs in int8 (#73), so outputs can differ from fp16 prefill.**
+**EXL3 4.00 bpw · DFlash2 + 8-row token tree · 262,144 context · one RTX 3090 at 350 W, quiet fans · the draft never changes the output (acceptance proved in Bend) · prefill trades precision for speed: int8 Q·Kᵀ and fp16 sums, so outputs can differ from full-precision prefill.**
+
+elpis-fast is the speed-first build. Its accurate sibling is [elpis](https://github.com/gildrb/elpis): same model, same benchmarks, full-precision arithmetic, every speedup proven or removed.
+
+| | elpis-fast (this repo) | elpis |
+|---|---|---|
+| Rule | fastest serving whose quality is measured | every speedup provably keeps the output (Bend) or is removed |
+| Speculative decoding | the draft never changes the output: Bend proof + bitwise tests | same |
+| Prefill arithmetic | int8 Q·Kᵀ and fp16 sums (P·V, GEMM slices); outputs can differ from full-precision prefill | goal: fp32 sums everywhere (being built) |
+| Evidence | teacher-forced KL within exact-numerics floors; broad-suite rewards | byte-identity (draft on/off, repeated runs) and accuracy vs an fp32 reference (planned) |
+| Model | EXL3 4.00 bpw weights, 3-bit KV cache (not identical to BF16) | same |
 
 ## How it compares with other RTX 3090 results for this model
 
@@ -102,7 +112,8 @@ In short:
 | Claim | Proof | Result |
 |---|---|---|
 | The draft never changes the text | invariance gate (`cs10`): 15 prompts × normal / capped / all-rejected draft; not yet re-run on the int8-prefill stack (#73/#74) | 45/45 identical token ids |
-| Decode speedups never change the text | lane 20 + C1 15 answers, `cs10` → `cs11` → `cs12` → `tree3s` | byte-identical |
+| Decode speedups since `cs10` never changed the text | lane 20 + C1 15 answers, `cs10` → `cs11` → `cs12` → `tree3s` | byte-identical |
+| Earlier kept speedups did change the text | decode 3003, 2102, 8202, 3006, 2105, 5106; prefill 3010 (P·V summed in fp16) | kept after numerics checks (2105: error vs fp32 no worse; 5106: error vs fp64 lower) |
 | Exact prefill patches 3020 / 5111 / 5112 never change the text | prefill suite, 9 rows: #71 and #72 vs #70 | byte-identical |
 | **Exception:** int8 prefill Q·Kᵀ (3021c, live since #73) changes the text | prefill suite, 9 rows: #73 vs #70 | first token 9/9 identical; 32-token continuations 4/9 differ after 22-52 characters |
 | Power and clocks never change the text | lane 20 + C1 15 answers, 250 W (#67) vs 350 W (#68); memory offsets 0 … −2000 (RoundBench ids) | byte-identical |
@@ -115,7 +126,7 @@ In short:
 | Scores, int8 prefill `p3021p` (#73) | AIME 2025 3/3 · MMLU-Pro 8/10 · I3 Logic 1/4 · LiveCodeBench 1/3 | I3 task 1: correct at 14,217 tokens on `tree3s`; hit the 16,384-token cap on `p3021p` |
 
 - [`LAWS.bend`](LAWS.bend) = contract; [`PROOF.bend`](PROOF.bend) = proofs. Order for every engine change: law → proof → measurement.
-- Proofs cover the Bend models. CUDA / Python conformance = the bitwise differentials above (evidence, not proof). The speculation proof assumes each verify row's token depends only on its prefix (`~rinv`, [`bend/spec_inv_tree_laws.bend`](bend/spec_inv_tree_laws.bend)); the kernel rows above test that assumption, they do not prove it.
+- Proofs cover Bend models of the logic and of each modelled kernel's schedule: which outputs it computes, each exactly once, in which summation order, and row invariance for verify attention. Not proven: that the CUDA code matches those models, and the floating-point values themselves; both are tested (bitwise differentials above). The speculation proof assumes each verify row's token depends only on its prefix (`~rinv`, [`bend/spec_inv_tree_laws.bend`](bend/spec_inv_tree_laws.bend)); the kernel row-invariance laws support that assumption, but the link between them is a prose argument (the tree design note, not in this repo), not a proof.
 
 ## 262K context
 
