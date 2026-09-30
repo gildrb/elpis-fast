@@ -2,14 +2,14 @@
 
 **EXL3 4.00 bpw · DFlash2 + 8-row token tree · 262,144 context · one RTX 3090 at 350 W, quiet fans · the draft never changes the output (acceptance proved in Bend) · prefill trades precision for speed: int8 Q·Kᵀ and fp16 sums, so outputs can differ from full-precision prefill.**
 
-elpis-fast is the speed-first build. Its accurate sibling is [elpis](https://github.com/gildrb/elpis): same model, same benchmarks, never less precise than stock ExLlamaV3.
+elpis-fast is the speed-first build. Its sibling [elpis](https://github.com/gildrb/elpis) targets never-less-precise-than-stock serving: same model, same benchmarks, but #76/#77 currently fail precision qualification ([gate](docs/benchmarks.md#9-elpis-served-exact-precision-qualification-2026-09-30)).
 
 | | elpis-fast (this repo) | elpis |
 |---|---|---|
-| Rule | fastest serving whose quality is measured | every speedup is Bend-proven to keep the output bit for bit, or measured at least as accurate as the stock kernel it replaces; nothing computes less precisely than stock ExLlamaV3 |
+| Rule (target) | fastest serving whose quality is measured | every speedup must be Bend-proven to keep the output bit for bit, or measured at least as accurate as the stock kernel it replaces; never less precise than stock ExLlamaV3; #76/#77 currently violate this bar |
 | Speculative decoding | the draft never changes the output: Bend proof + bitwise tests | same |
 | Prefill arithmetic | int8 Q·Kᵀ and fp16 P·V sums; outputs can differ from full-precision prefill | fp32 sums in prefill attention (3022 v4); prefill GEMMs use stock's own scheme, bit-exact with stock; no int8 |
-| Evidence | teacher-forced KL within exact-numerics floors; broad-suite rewards; attention error vs fp64 3.6-33× stock's (median 25×) | vs fp64: prefill attention error ≤ stock Triton in 16/16 cells, decode error ≤ stock on every op; draft on/off byte-identity 90/90 |
+| Evidence | teacher-forced KL within exact-numerics floors; broad-suite rewards; attention error vs fp64 3.6-33× stock's (median 25×) | #76/#77 prefill fails the served-exact gate in 5/16 cells ([details](docs/benchmarks.md#9-elpis-served-exact-precision-qualification-2026-09-30)); decode error ≤ stock on every measured op; draft on/off byte-identity 90/90 |
 | Model | EXL3 4.00 bpw weights, 3-bit KV cache (not identical to BF16) | same |
 
 ## How it compares with other RTX 3090 results for this model
@@ -78,13 +78,13 @@ In short:
 
 **elpis-fast vs elpis** (same prompts, same protocol, 350 W):
 
-| | elpis-fast `pfast1` | elpis `p9502` (#77) |
+| | elpis-fast `pfast1` | elpis `p9502` (#77; historical, not precision-qualified) |
 |---|---|---|
 | Cold prefill, geomean over 8K / 32K / 128K / 262K | 1,164.9 tok/s (+13.0 %) | 1,031.2 tok/s |
 | Time to first token, 8K / 32K / 128K / 262K | 5.58 / 22.67 / 123.66 / 322.98 s | 5.50 / 23.94 / 146.25 / 427.29 s |
 | Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens (mean of three 350 W windows per image; elpis measured on `p9501x4`, #76) | 25.50 / 26.24 / 28.39 | 25.73 / 26.19 / 28.36 |
 | Scores: AIME 2025 · MMLU-Pro · I3 Logic · LiveCodeBench | 3/3 · 8/10 · 1/4 · 1/3 (`p3021p`, #73: same prefill arithmetic, without 5110g / 9501b) | 3/3 · 8/10 · 1/4 · 1/3 |
-| Prefill attention error vs fp64, relative to stock Triton | median 25× stock (3.6-33×) | ≤ stock in 16/16 cells |
+| Prefill attention error vs fp64, relative to stock Triton | median 25× stock (3.6-33×) | old staged-fp16 K/V reference, unsplit stock at prefix 0: ≤ stock 16/16; exact CQ3 K/V + served stock: fails 5/16 ([gate](docs/benchmarks.md#9-elpis-served-exact-precision-qualification-2026-09-30)) |
 
 - The decode rows compare the same 8-row verify per round. Tokens per round follow each build's own text, so tok/s is not comparable across builds.
 
@@ -325,6 +325,9 @@ python3 -m bench.gsm8k_compare --api-key-file /path/to/api-key --data gsm8k-test
 
 | Work | Status | Measured so far |
 |---|---|---|
+| elpis candidate 3024: approximate Q + exact K | **unqualified, not kept**; native capacity, quality and TTFT pending | 28 distinct sampled + 4 all-row cells and per-head mean/p99/max pass; active K/V crosscheck within derived bound; row-mod-4=0 L0/prefix-0 max error is 2.86 % worse at q_len 2048/4096 ([scope and diagnosis](docs/benchmarks.md#9-elpis-served-exact-precision-qualification-2026-09-30)) |
+| elpis candidate 3025 | dropped current candidate | no useful production speed gain; not a precision fix |
+| elpis candidate 3026: V-only staging on 3024 | exact; native memory passes; not precision-qualified (inherits 3024's failure) | CUDA differential 4/4 cells; 262,136 + 8 tokens at native context: 583 MiB minimum allocator headroom |
 | Draft fine-tune on agent traffic (tool calls, SWE turns) | data done: 2,869 prompts, 1.66M tokens, disjoint from all eval sets; training next | pilot, live engine: agent tokens / round +4.22 % (95 % CI +3.14..+5.65), control −0.01 % (−0.66..+0.60); generic self-distillation +0.23 % (−0.13..+0.62, replay estimate): dropped |
 | Draft precision 4 / 5 / 6 / 8 bpw | queued | — |
 | Prefill: merge aligned 2,048-row chunks into 4,096 (5110) | 262K error was out-of-memory in the first verify round; fix under test | 32K / 128K: identical outputs, first token ×0.974 / ×0.970 |
