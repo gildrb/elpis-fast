@@ -82,7 +82,7 @@ In short:
 |---|---|---|
 | Cold prefill, geomean over 8K / 32K / 128K / 262K | 1,164.9 tok/s (+16.7 %) | 997.8 tok/s |
 | Time to first token, 8K / 32K / 128K / 262K | 5.58 / 22.67 / 123.66 / 322.98 s | 5.67 / 24.54 / 153.39 / 439.53 s |
-| Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens | 25.48 / 26.23 / 28.39 (two windows) | 25.78 / 26.19 / 28.41 (one window) |
+| Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens (mean of three 350 W windows per image) | 25.50 / 26.24 / 28.39 | 25.73 / 26.19 / 28.36 |
 | Scores: AIME 2025 · MMLU-Pro · I3 Logic · LiveCodeBench | 3/3 · 8/10 · 1/4 · 1/3 (`p3021p`, #73: same prefill arithmetic, without 5110g / 9501b) | 3/3 · 8/10 · 1/4 · 1/3 |
 | Prefill attention error vs fp64, relative to stock Triton | median 25× stock (3.6-33×) | ≤ stock in 16/16 cells |
 
