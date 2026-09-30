@@ -2,14 +2,14 @@
 
 **EXL3 4.00 bpw · DFlash2 + 8-row token tree · 262,144 context · one RTX 3090 at 350 W, quiet fans · the draft never changes the output (acceptance proved in Bend) · prefill trades precision for speed: int8 Q·Kᵀ and fp16 sums, so outputs can differ from full-precision prefill.**
 
-elpis-fast is the speed-first build. Its accurate sibling is [elpis](https://github.com/gildrb/elpis): same model, same benchmarks, full-precision arithmetic, every speedup proven or removed.
+elpis-fast is the speed-first build. Its accurate sibling is [elpis](https://github.com/gildrb/elpis): same model, same benchmarks, never less precise than stock ExLlamaV3.
 
 | | elpis-fast (this repo) | elpis |
 |---|---|---|
-| Rule | fastest serving whose quality is measured | every speedup provably keeps the output (Bend) or is removed |
+| Rule | fastest serving whose quality is measured | every speedup is Bend-proven to keep the output bit for bit, or measured at least as accurate as the stock kernel it replaces; nothing computes less precisely than stock ExLlamaV3 |
 | Speculative decoding | the draft never changes the output: Bend proof + bitwise tests | same |
-| Prefill arithmetic | int8 Q·Kᵀ and fp16 sums (P·V, GEMM slices); outputs can differ from full-precision prefill | goal: fp32 sums everywhere (being built) |
-| Evidence | teacher-forced KL within exact-numerics floors; broad-suite rewards | byte-identity (draft on/off, repeated runs) and accuracy vs an fp32 reference (planned) |
+| Prefill arithmetic | int8 Q·Kᵀ and fp16 P·V sums; outputs can differ from full-precision prefill | fp32 sums in prefill attention (3022 v4); prefill GEMMs use stock's own scheme, bit-exact with stock; no int8 |
+| Evidence | teacher-forced KL within exact-numerics floors; broad-suite rewards; attention error vs fp64 3.6-33× stock's (median 25×) | vs fp64: prefill attention error ≤ stock Triton in 16/16 cells, decode error ≤ stock on every op; draft on/off byte-identity 90/90 |
 | Model | EXL3 4.00 bpw weights, 3-bit KV cache (not identical to BF16) | same |
 
 ## How it compares with other RTX 3090 results for this model
@@ -45,11 +45,12 @@ What differs:
   trellis-serve 2.25-3.48 (MTP) and 2.45-5.65 (DFlash2) on its panel; elpis 3.93 on the lane's
   C1 rows, 5.66 on GSM8K.
 
-Prefill and long context (others quoted; elpis measured: cold prompt, time of a 1-token request, 350 W, run #73):
+Prefill and long context (others quoted; elpis-fast and elpis measured: cold prompt, time of a 1-token request, 350 W, image `pfast1` and elpis run #76):
 
 | One RTX 3090 | 32K prompt: time to first token | Longest prompt shown |
 |---|---|---|
-| **elpis** (350 W) | 23.3 s (1,410 tok/s) | 262,000 tokens: 322.0 s to first token |
+| **elpis-fast** (350 W, int8 Q·Kᵀ) | 22.7 s (1,448 tok/s) | 262,052 tokens: 323.0 s to first token |
+| **elpis** (350 W, fp32 attention sums) | 24.5 s (1,337 tok/s) | 262,052 tokens: 439.5 s to first token |
 | trellis-serve MTP (README headline) | 21.9 s (1,497 tok/s) | 208,858 tokens: 294 s to first token |
 | trellis-serve DFlash2 | 35.9 s (914 tok/s) | 126,782 tokens: 187 s to first token |
 | r0b0tlab | not published (150K prompt: 594 tok/s) | 262,080 tokens (needle test) |
@@ -60,20 +61,32 @@ In short:
 
 - Same test, same 350 W cap: elpis 202.9 vs r0b0tlab 162.9 tok/s (+24.6 %).
 - Decode only: trellis-serve DFlash2 225-227 tok/s on its code and thinking-on prose panels (3.00 bpw, 131K window, SM 1.74 GHz, power unpublished); elpis 214.8 on GSM8K (*computed*; 4.00 bpw, 262K window).
-- Prefill at 32K: trellis-serve MTP fastest (21.9 s); elpis 23.3 s; trellis-serve DFlash2 35.9 s.
+- Prefill at 32K: trellis-serve MTP fastest (21.9 s); elpis-fast 22.7 s; elpis 24.5 s; trellis-serve DFlash2 35.9 s.
 - trellis-serve's README headline (MTP): 96-141 tok/s decode.
 
 ## Speed
 
-**Target:** most tok/s at the native 262K context, one RTX 3090, 350 W. **Status** (live `p3021r`: #73's stack rebuilt after the rename and re-measured byte-identical as #74 = the `tree3s` decode stack + prefill patches 3020/5111/5112/3021c, where 3021c computes prefill Q·Kᵀ in int8; 350 W, memory offset 0, 2026-09-29; decode rows measured on `tree3s`, whose decode path is unchanged):
+**Target:** most tok/s at the native 262K context, one RTX 3090, 350 W. **Status:** best image `pfast1` = #74's stack (`tree3s` decode + prefill patches 3020/5111/5112/3021c, where 3021c computes prefill Q·Kᵀ in int8) + 5110g + 9501b; 350 W, memory offset 0, 2026-09-30. Live serving runs `p3021r` (#74). Decode rows were measured on `tree3s`, whose decode path is unchanged.
 
 | Workload | tok/s | Tokens / round | tok/J |
 |---|---|---|---|
 | **Lane**: 20 calls, AIME 2025 · MMLU-Pro · I3 Logic · LiveCodeBench v6, thinking on, whole request (#68) | **161.79** | — | **0.497** |
 | **GSM8K**: 40 questions, 512 tokens, median of 5 runs | **202.9** | 5.66 | **0.617** |
 | C1 whole request, 1K / 8K / 32K-token prompt, 1,024 tokens out | 185.3 / 73.3 / 29.0 | 5.81 / 3.40 / 3.37 | 0.578 / 0.217 / 0.085 |
-| Prefill, cold 8K / 32K / 128K / 262K prompt (1-token request, #73) | 1,465 / 1,410 / 1,067 / 814 | — | — |
+| Prefill, cold 8K / 32K / 128K / 262K prompt (1-token request, `pfast1`) | 1,477 / 1,448 / 1,060 / 811 | — | — |
 | Decode only, 1K / 8K context (RoundBench, 12 reps) | 151.1 / 125.2 | 3.89 / 3.31 | 0.456 / 0.380 |
+
+**elpis-fast vs elpis** (same prompts, same protocol, 350 W):
+
+| | elpis-fast `pfast1` | elpis `p9501x4` (#76) |
+|---|---|---|
+| Cold prefill, geomean over 8K / 32K / 128K / 262K | 1,164.9 tok/s (+16.7 %) | 997.8 tok/s |
+| Time to first token, 8K / 32K / 128K / 262K | 5.58 / 22.67 / 123.66 / 322.98 s | 5.67 / 24.54 / 153.39 / 439.53 s |
+| Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens | 25.48 / 26.23 / 28.39 (two windows) | 25.78 / 26.19 / 28.41 (one window) |
+| Scores: AIME 2025 · MMLU-Pro · I3 Logic · LiveCodeBench | 3/3 · 8/10 · 1/4 · 1/3 (`p3021p`, #73: same prefill arithmetic, without 5110g / 9501b) | 3/3 · 8/10 · 1/4 · 1/3 |
+| Prefill attention error vs fp64, relative to stock Triton | median 25× stock (3.6-33×) | ≤ stock in 16/16 cells |
+
+- The decode rows compare the same 8-row verify per round. Tokens per round follow each build's own text, so tok/s is not comparable across builds.
 
 <details><summary>Lane per task (#68, 350 W)</summary>
 
