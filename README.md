@@ -45,12 +45,12 @@ What differs:
   trellis-serve 2.25-3.48 (MTP) and 2.45-5.65 (DFlash2) on its panel; elpis 3.93 on the lane's
   C1 rows, 5.66 on GSM8K.
 
-Prefill and long context (others quoted; elpis-fast and elpis measured: cold prompt, time of a 1-token request, 350 W, image `pfast1` and elpis run #76):
+Prefill and long context (others quoted; elpis-fast and elpis measured: cold prompt, time of a 1-token request, 350 W, image `pfast1` and elpis run #77):
 
 | One RTX 3090 | 32K prompt: time to first token | Longest prompt shown |
 |---|---|---|
 | **elpis-fast** (350 W, int8 Q·Kᵀ) | 22.7 s (1,448 tok/s) | 262,052 tokens: 323.0 s to first token |
-| **elpis** (350 W, fp32 attention sums) | 24.5 s (1,337 tok/s) | 262,052 tokens: 439.5 s to first token |
+| **elpis** (350 W, fp32 attention sums) | 23.9 s (1,371 tok/s) | 262,052 tokens: 427.3 s to first token |
 | trellis-serve MTP (README headline) | 21.9 s (1,497 tok/s) | 208,858 tokens: 294 s to first token |
 | trellis-serve DFlash2 | 35.9 s (914 tok/s) | 126,782 tokens: 187 s to first token |
 | r0b0tlab | not published (150K prompt: 594 tok/s) | 262,080 tokens (needle test) |
@@ -78,11 +78,11 @@ In short:
 
 **elpis-fast vs elpis** (same prompts, same protocol, 350 W):
 
-| | elpis-fast `pfast1` | elpis `p9501x4` (#76) |
+| | elpis-fast `pfast1` | elpis `p9502` (#77) |
 |---|---|---|
-| Cold prefill, geomean over 8K / 32K / 128K / 262K | 1,164.9 tok/s (+16.7 %) | 997.8 tok/s |
-| Time to first token, 8K / 32K / 128K / 262K | 5.58 / 22.67 / 123.66 / 322.98 s | 5.67 / 24.54 / 153.39 / 439.53 s |
-| Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens (mean of three 350 W windows per image) | 25.50 / 26.24 / 28.39 | 25.73 / 26.19 / 28.36 |
+| Cold prefill, geomean over 8K / 32K / 128K / 262K | 1,164.9 tok/s (+13.0 %) | 1,031.2 tok/s |
+| Time to first token, 8K / 32K / 128K / 262K | 5.58 / 22.67 / 123.66 / 322.98 s | 5.50 / 23.94 / 146.25 / 427.29 s |
+| Decode: median ms per verify round at 1K / 8K / 32K context, 256 tokens (mean of three 350 W windows per image; elpis measured on `p9501x4`, #76) | 25.50 / 26.24 / 28.39 | 25.73 / 26.19 / 28.36 |
 | Scores: AIME 2025 · MMLU-Pro · I3 Logic · LiveCodeBench | 3/3 · 8/10 · 1/4 · 1/3 (`p3021p`, #73: same prefill arithmetic, without 5110g / 9501b) | 3/3 · 8/10 · 1/4 · 1/3 |
 | Prefill attention error vs fp64, relative to stock Triton | median 25× stock (3.6-33×) | ≤ stock in 16/16 cells |
 
