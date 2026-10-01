@@ -208,6 +208,13 @@ def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+PYTHON_LITERALS: dict[str, tuple[JSON]] = {
+    "True": (True,),
+    "False": (False,),
+    "None": (None,),
+}
+
+
 def load_json(text: str) -> JSON:
     """Decode JSON with duplicate-key and nonfinite-number rejection.
 
@@ -327,6 +334,11 @@ class Tool:
         # that interpretation for string/nonstring unions, preserving e.g. "001".
         if validator.is_valid(raw):
             return raw
+        # Qwen's template prints Python values; the model may echo that casing.
+        # Accept it only where the schema accepts the resulting JSON value.
+        literal = PYTHON_LITERALS.get(raw.strip())
+        if literal is not None and validator.is_valid(literal[0]):
+            return literal[0]
         try:
             value = load_json(raw)
         except (ValueError, RecursionError) as exc:
