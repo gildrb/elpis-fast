@@ -73,6 +73,17 @@ SCHEMA_SINGLE = {
     "else",
 }
 SCHEMA_ARRAYS = {"allOf", "anyOf", "oneOf", "prefixItems"}
+# Keywords applying subschemas to the whole tool-argument object, and the keywords
+# by which a subschema would declare a parameter's value schema.
+ROOT_COMPOSITION = {"allOf", "anyOf", "oneOf", "if", "then", "else", "dependentSchemas"}
+PARAMETER_SCHEMAS = {
+    "$ref",
+    "$dynamicRef",
+    "properties",
+    "patternProperties",
+    "additionalProperties",
+    "unevaluatedProperties",
+}
 FORMAT_CHECKER = FormatChecker()
 # Persistent prefix cache (engine generator/persist.py). Saved on SIGTERM and after 30 s idle, at most every 5 min.
 PERSIST_ENV = "QWEN_PREFIX_PERSIST"
@@ -298,6 +309,38 @@ def check_schema_nodes(schema: JSON, root: dict[str, JSON]) -> None:
             check_schema_nodes(child, root)
 
 
+def check_root_composition(node: dict[str, JSON]) -> None:
+    """Admit whole-object composition only when it leaves parameter schemas at the root.
+
+    Each XML parameter decodes against the root's properties, patternProperties and
+    additionalProperties alone, so a branch that declares parameter schemas would make
+    that mapping ambiguous. Branches that only constrain the object (e.g. which
+    parameters are required) cannot; the whole-argument validation enforces them.
+
+    Raises:
+        APIError: A composed subschema declares or references parameter schemas.
+    """
+    for keyword in ROOT_COMPOSITION & node.keys():
+        value = node[keyword]
+        children: list[JSON]
+        if keyword == "dependentSchemas":
+            children = list(object_value(value, keyword).values())
+        elif isinstance(value, list):
+            children = value
+        else:
+            children = [value]
+        for child in children:
+            if isinstance(child, bool):
+                continue
+            child = object_value(child, keyword)
+            if PARAMETER_SCHEMAS & child.keys():
+                raise APIError(
+                    "Tool parameter root composition may only constrain the object; "
+                    "put parameter schemas in the root properties"
+                )
+            check_root_composition(child)
+
+
 @dataclass
 class Tool:
     """A declared function and the validator governing its returned arguments."""
@@ -399,22 +442,14 @@ def parse_tools(value: JSON) -> dict[str, Tool]:
         # unambiguous. Nested schemas have the full admitted draft vocabulary.
         if schema.get("type") != "object":
             raise APIError("Tool parameters must declare type: object")
-        if set(schema) & {
-            "$ref",
-            "allOf",
-            "anyOf",
-            "oneOf",
-            "if",
-            "then",
-            "else",
-            "dependentSchemas",
-        }:
+        if "$ref" in schema:
             raise APIError(
-                "Tool parameter root composition is unsupported; put schemas in properties"
+                "Tool parameters root $ref is unsupported; inline the object"
             )
         try:
             Draft202012Validator.check_schema(schema)
             check_schema_nodes(schema, schema)
+            check_root_composition(schema)
             registry = Registry().with_resource(
                 "urn:exl3:parameters", DRAFT202012.create_resource(schema)
             )
