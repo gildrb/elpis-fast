@@ -14,9 +14,16 @@ __pycache__/
 benchmark-runs/
 # Host-built acceptance artifact staged for the candidate image build.
 /build/
+# nix build output link.
+/result
 
 # Upstream evaluation source, environments, data and native traces stay local.
 /eval/.sources/
 /eval/.cache/
 /eval/runs/
 /eval/outputs/
+
+# Private agent rules and local operator scripts stay out of the repository.
+/AGENTS.md
+/.omp/
+/ops/

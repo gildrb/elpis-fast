@@ -1,0 +1,18 @@
+# Maintainer review for build, deploy, serving, proof and security files.
+/.github/            @gildrb
+/Dockerfile.exl3     @gildrb
+/docker/             @gildrb
+/docker-compose.yml  @gildrb
+/flake.nix           @gildrb
+/flake.lock          @gildrb
+/nix/                @gildrb
+/serve/              @gildrb
+/prepare/            @gildrb
+/patches/            @gildrb
+/LAWS.bend           @gildrb
+/PROOF.bend          @gildrb
+/bend/               @gildrb
+/eval/scripts/       @gildrb
+/autoresearch.sh     @gildrb
+/SECURITY.md         @gildrb
+/LICENSE             @gildrb
