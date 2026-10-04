@@ -505,7 +505,7 @@
          # references to recurrent state objects past this iteration.
 --- /dev/null
 +++ b/generator/tree_pipe.py
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,234 @@
 +"""
 +Pipelined tree verify round (elpis-fast ext 9601, bend/tree_pipe*.bend).
 +
@@ -622,6 +622,7 @@
 +        self.stream = torch.cuda.Stream(dev)
 +        self.fault = fault
 +        self.layers = {}
++        self.conv = {}
 +        self.staged_rounds = 0
 +        self.recomputed_rounds = 0
 +
@@ -673,25 +674,67 @@
 +        return layers
 +
 +
++    def _conv_jobs(self, state) -> tuple[int, list, list]:
++        """
++        (device index, save jobs, restore jobs) for the conv window conv_state[slot, :, :cdim] of every GDN layer:
++        a history verify rewrites the whole conv buffer (the window head included: the buffer holds
++        cdim + max_history columns and the verify writes its last min(cdim + max_history, cdim + seqlen)
++        inputs), so a discarded verify must restore the committed window from a copy taken before it ran.
++        Jobs for ext.batched_conv_rewind (same per-channel stride; save buffers allocated once per layer).
++        """
++        key = (id(state.cache), state.slot)
++        entry = self.conv.get(key)
++        layers = self._layers(state)
++        addrs = tuple(layer.conv_state.data_ptr() for layer in layers)
++        if entry is not None and entry[0] == addrs:
++            return entry[1]
++        devices = {torch.device(layer.device).index for layer in layers}
++        if len(devices) != 1:
++            raise RuntimeError("Tree pipe: the GDN layers must share one device")
++        save_jobs, restore_jobs, keep = [], [], []
++        for layer in layers:
++            cs = layer.conv_state
++            if cs.dim() != 3 or cs.stride(2) != 1:
++                raise RuntimeError("Tree pipe: unexpected GDN conv state layout")
++            buf = torch.empty((cs.shape[1], cs.stride(1)), dtype = cs.dtype, device = cs.device)
++            es = cs.element_size()
++            head = cs.data_ptr() + state.slot * cs.stride(0) * es
++            cdim = layer.module.conv_kernel_size
++            save_jobs.append(ext.ConvRewindJob(head, buf.data_ptr(), cs.shape[1], cdim, cs.stride(1)))
++            restore_jobs.append(ext.ConvRewindJob(buf.data_ptr(), head, cs.shape[1], cdim, cs.stride(1)))
++            keep.append(buf)
++        jobs = (devices.pop(), save_jobs, restore_jobs)
++        self.conv[key] = (addrs, jobs, keep)
++        return jobs
++
++
 +    def snapshot(self, state) -> tuple:
-+        """The host state a verify forward changes for the GDN state `state` (see discard)."""
++        """
++        The state a verify forward changes for the GDN state `state` (see discard); launches the copy of every
++        layer's committed conv window on the current stream, ahead of the speculative verify.
++        """
 +        layers = self._layers(state)
 +        slot = state.slot
 +        if any(slot in layer.pending for layer in layers):
 +            raise RuntimeError("Tree pipe: a pending GDN verify precedes the staged round")
++        device, save_jobs, _ = self._conv_jobs(state)
++        ext.batched_conv_rewind(save_jobs, device)
 +        return state, state.position, state.last_history, [layer for layer in layers if slot in layer.flushed]
 +
 +
 +    def discard(self, snap: tuple):
 +        """
-+        Undo the speculative verify forward's host state: no layer holds its verify as pending (nothing is
-+        replayed: recurrent row 0 still holds the committed state, the conv windows the committed columns),
-+        the flushed set and the state's position and history are as before. Its K/V rows past the committed
-+        position and its per-layer statics are scratch that the next forward overwrites.
++        Undo the speculative verify forward: no layer holds its verify as pending (nothing is replayed:
++        recurrent row 0 still holds the committed state), every layer's conv window is restored from the copy
++        snapshot() took (stream-ordered after the speculative verify), the flushed set and the state's position
++        and history are as before. Its K/V rows past the committed position, the conv buffer's history columns
++        and its per-layer statics are scratch that the recompute overwrites before reading.
 +        """
 +        state, position, last_history, flushed = snap
 +        for layer in self._layers(state):
 +            layer.pending.pop(state.slot, None)
++        device, _, restore_jobs = self._conv_jobs(state)
++        ext.batched_conv_rewind(restore_jobs, device)
 +        for layer in flushed:
 +            layer.flushed.add(state.slot)
 +        state.position = position

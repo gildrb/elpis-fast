@@ -5,7 +5,7 @@
 # host embedding of the row tokens) and runs the verify on them (~f). A record
 # that fails the check fails the round before any verify runs. Independent of
 # tree_pipe.bend's kernel indexing and readback logic; it shares only the data
-# shapes.
+# shapes. w is the committed GDN conv window the verify reads.
 import Base
 import ./tree_pipe.bend as Impl
 
@@ -62,6 +62,6 @@ def run(checked: Bool, ids: List<&2, U32>) -> Round:
     case False{}:
       SeqFail{}
 
-def seq_round(~f: Impl.Staged -> List<&2, U32>, ~ok: Impl.Record -> Bool, ~emb: Nat -> Nat,
-    +rec: Impl.Record, +base: Nat) -> Round:
-  run(ok(rec), f(upload(~emb, rec, base)))
+def seq_round(~f: Impl.Staged -> List<&2, Nat> -> List<&2, U32>, ~ok: Impl.Record -> Bool, ~emb: Nat -> Nat,
+    +rec: Impl.Record, +base: Nat, +w: List<&2, Nat>) -> Round:
+  run(ok(rec), f(upload(~emb, rec, base), w))

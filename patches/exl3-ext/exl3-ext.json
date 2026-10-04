@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "c61011728779d2b013d4f8ea3d76e6dcdc66ba2738791e0a10a7abb285084d4d",
+  "series_sha256": "b4a4ae2ded8cbaf09430910b5711f0c70cc9aa92c632df3a068c9df611bcaa19",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -204,7 +204,7 @@
     },
     {
       "name": "9601-tree-verify-pipe.patch",
-      "sha256": "541486176f3af0cd8887ae6395216dc009c1ea484df9f733c09dd79663ed2cc9"
+      "sha256": "6e130472e2331d63b8fd81a424438e8d72a9d64b988e6bcac96921b4b3c303ed"
     }
   ],
   "files": {
@@ -482,7 +482,7 @@
     },
     "generator/tree_pipe.py": {
       "pre": null,
-      "post": "02ef637fae86e897f0cdf618a3c79f9c6bc1c4fc43b06c4e9b1e8c878c196fe0"
+      "post": "e21c6968e943c4d6475904d8db3f7c44fa55fe2dad9b4354ffb8459368263d70"
     },
     "model/model.py": {
       "pre": "013edc062e64d8fad98695491dd3fd504723752377db7e8f338c88e5afb85448",

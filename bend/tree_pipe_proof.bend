@@ -130,28 +130,28 @@ def expect_upload(~emb: Nat -> Nat, +rec: Impl.Record, +base: Nat)
 # ---------------------------------------------------------------------------
 # P1 - P3: the decision
 
-def p1_go(~f: Impl.Staged -> List<&2, U32>, +b: Bool, +q: Bool, +v: Impl.Staged, +u: Impl.Staged,
-    hq: {Impl.staged_eq(v, u) == q : Bool})
-  -> {Laws.emitted(Impl.decide(b, q, f(v), f(u))) == Spec.run(b, f(u)) : Spec.Round}:
+def p1_go(~f: Impl.Staged -> List<&2, Nat> -> List<&2, U32>, +b: Bool, +q: Bool, +v: Impl.Staged, +u: Impl.Staged,
+    +w: List<&2, Nat>, hq: {Impl.staged_eq(v, u) == q : Bool})
+  -> {Laws.emitted(Impl.decide(b, q, f(v, w), f(u, w))) == Spec.run(b, f(u, w)) : Spec.Round}:
   match b:
     case False{}:
       {==}
     case True{}:
       match q:
         case True{}:
-          %Equal.sym(Impl.Staged, v, u, staged_sound(v, u, hq)) : {Spec.SeqOk{f(_)} == Spec.SeqOk{f(u)} : Spec.Round}
+          %Equal.sym(Impl.Staged, v, u, staged_sound(v, u, hq)) : {Spec.SeqOk{f(_, w)} == Spec.SeqOk{f(u, w)} : Spec.Round}
           {==}
         case False{}:
           {==}
 
-def Laws.pipe_refines_seq(f, ok, emb, rec, v, base):
+def Laws.pipe_refines_seq(f, ok, emb, clob, rec, v, base, w):
   +u = Spec.upload(~emb, rec, base)
   %Equal.sym(Impl.Staged, Impl.expect(~emb, rec, base), u, expect_upload(~emb, rec, base))
-    : {Laws.emitted(Impl.decide(ok(rec), Impl.staged_eq(v, _), f(v), f(_))) == Spec.run(ok(rec), f(u)) : Spec.Round}
-  p1_go(~f, ok(rec), Impl.staged_eq(v, u), v, u, {==})
+    : {Laws.emitted(Impl.decide(ok(rec), Impl.staged_eq(v, _), f(v, w), f(_, w))) == Spec.run(ok(rec), f(u, w)) : Spec.Round}
+  p1_go(~f, ok(rec), Impl.staged_eq(v, u), v, u, w, {==})
 
-def p2_go(~f: Impl.Staged -> List<&2, U32>, b: Bool, q: Bool, +v: Impl.Staged, +e: Impl.Staged, -u: Impl.Staged,
-    hq: {Impl.staged_eq(v, e) == q : Bool}, hk: {Laws.kept(Impl.decide(b, q, f(v), f(e))) == True{} : Bool},
+def p2_go(+x: List<&2, U32>, +y: List<&2, U32>, b: Bool, q: Bool, +v: Impl.Staged, +e: Impl.Staged, -u: Impl.Staged,
+    hq: {Impl.staged_eq(v, e) == q : Bool}, hk: {Laws.kept(Impl.decide(b, q, x, y)) == True{} : Bool},
     heu: {e == u : Impl.Staged})
   -> {v == u : Impl.Staged} & {b == True{} : Bool}:
   match b:
@@ -164,28 +164,29 @@ def p2_go(~f: Impl.Staged -> List<&2, U32>, b: Bool, q: Bool, +v: Impl.Staged, +
         case False{}:
           Empty.absurd({v == u : Impl.Staged} & {True{} == True{} : Bool}, ChainProof.false_true(hk))
 
-def Laws.pipe_kept_checked(f, ok, emb, rec, v, base, k):
+def Laws.pipe_kept_checked(f, ok, emb, clob, rec, v, base, w, k):
   +e = Impl.expect(~emb, rec, base)
-  p2_go(~f, ok(rec), Impl.staged_eq(v, e), v, e, Spec.upload(~emb, rec, base), {==}, k, expect_upload(~emb, rec, base))
+  p2_go(f(v, w), f(e, Impl.restore(Impl.saved(w), clob(v, w))), ok(rec), Impl.staged_eq(v, e), v, e, Spec.upload(~emb, rec, base), {==}, k, expect_upload(~emb, rec, base))
 
-def p3_go(~f: Impl.Staged -> List<&2, U32>, b: Bool, q: Bool, +v: Impl.Staged, +u: Impl.Staged,
+def p3_go(+x: List<&2, U32>, +y: List<&2, U32>, b: Bool, q: Bool, +v: Impl.Staged, +u: Impl.Staged,
     hq: {Impl.staged_eq(v, u) == q : Bool}, differ: {v == u : Impl.Staged} -> Empty)
-  -> {Laws.kept(Impl.decide(b, q, f(v), f(u))) == False{} : Bool}:
+  -> {Laws.kept(Impl.decide(b, q, x, y)) == False{} : Bool}:
   match b:
     case False{}:
       {==}
     case True{}:
       match q:
         case True{}:
-          Empty.absurd({Laws.kept(Impl.Kept{f(v)}) == False{} : Bool}, differ(staged_sound(v, u, hq)))
+          Empty.absurd({Laws.kept(Impl.Kept{x}) == False{} : Bool}, differ(staged_sound(v, u, hq)))
         case False{}:
           {==}
 
-def Laws.pipe_mismatch_discards(f, ok, emb, rec, v, base, differ):
+def Laws.pipe_mismatch_discards(f, ok, emb, clob, rec, v, base, w, differ):
   +u = Spec.upload(~emb, rec, base)
+  +y = f(Impl.expect(~emb, rec, base), Impl.restore(Impl.saved(w), clob(v, w)))
   %Equal.sym(Impl.Staged, Impl.expect(~emb, rec, base), u, expect_upload(~emb, rec, base))
-    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(v, _), f(v), f(_))) == False{} : Bool}
-  p3_go(~f, ok(rec), Impl.staged_eq(v, u), v, u, {==}, differ)
+    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(v, _), f(v, w), y)) == False{} : Bool}
+  p3_go(f(v, w), y, ok(rec), Impl.staged_eq(v, u), v, u, {==}, differ)
 
 # ---------------------------------------------------------------------------
 # P4: the stage kernel's indexed writes
@@ -326,14 +327,15 @@ def p5_go(b: Bool, q: Bool, +x: List<&2, U32>, +y: List<&2, U32>, hb: {b == True
         case False{}:
           Empty.absurd({Laws.kept(Impl.decide(True{}, False{}, x, y)) == True{} : Bool}, ChainProof.false_true(hq))
 
-def Laws.stage_kept(f, ok, emb, toks, desc, base, t8, d128, accepted):
+def Laws.stage_kept(f, ok, emb, clob, toks, desc, base, w, t8, d128, accepted):
   +rec = {Impl.Record{toks, desc} : Impl.Record}
   +u = Spec.upload(~emb, rec, base)
+  +y = f(Impl.expect(~emb, rec, base), Impl.restore(Impl.saved(w), clob(Impl.stage(~emb, rec, base), w)))
   %Equal.sym(Impl.Staged, Impl.stage(~emb, rec, base), u, Laws.stage_agree(~emb, toks, desc, base, t8, d128))
-    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(_, Impl.expect(~emb, rec, base)), f(_), f(Impl.expect(~emb, rec, base)))) == True{} : Bool}
+    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(_, Impl.expect(~emb, rec, base)), f(_, w), y)) == True{} : Bool}
   %Equal.sym(Impl.Staged, Impl.expect(~emb, rec, base), u, expect_upload(~emb, rec, base))
-    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(u, _), f(u), f(_))) == True{} : Bool}
-  p5_go(ok(rec), Impl.staged_eq(u, u), f(u), f(u), accepted, staged_refl(u))
+    : {Laws.kept(Impl.decide(ok(rec), Impl.staged_eq(u, _), f(u, w), y)) == True{} : Bool}
+  p5_go(ok(rec), Impl.staged_eq(u, u), f(u, w), y, accepted, staged_refl(u))
 
 # ---------------------------------------------------------------------------
 # P6: refinement of spec_inv_tree
@@ -345,14 +347,14 @@ def run_true(b: Bool, +ids: List<&2, U32>, hb: {b == True{} : Bool}) -> {Spec.ru
     case False{}:
       Empty.absurd({Spec.run(False{}, ids) == Spec.SeqOk{ids} : Spec.Round}, ChainProof.false_true(hb))
 
-def Laws.pipe_round_commits_greedy(row, rinv, f, ok, emb, rec, v, base, seq, t, stops, bp, checkpoint, legal, accepted, conf):
+def Laws.pipe_round_commits_greedy(row, rinv, f, ok, emb, clob, rec, v, base, w, seq, t, stops, bp, checkpoint, legal, accepted, conf):
   +u = Spec.upload(~emb, rec, base)
-  +out = Laws.emitted(Impl.pipe_round(~f, ~ok, ~emb, rec, v, base))
+  +out = Laws.emitted(Impl.pipe_round(~f, ~ok, ~emb, ~clob, rec, v, base, w))
   +tv = Tree.verify(~row, seq, Tree.nodes(t))
-  +s3 = Equal.trans(Spec.Round, out, Spec.seq_round(~f, ~ok, ~emb, rec, base), Spec.SeqOk{f(u)},
-    Laws.pipe_refines_seq(~f, ~ok, ~emb, rec, v, base), run_true(ok(rec), f(u), accepted))
-  +s4 = Equal.cong(Spec.Round, List<&2, U32>, r => Laws.ids_of(r), out, Spec.SeqOk{f(u)}, s3)
-  +s5 = Equal.trans(List<&2, U32>, Laws.ids_of(out), f(u), tv, s4, conf)
+  +s3 = Equal.trans(Spec.Round, out, Spec.seq_round(~f, ~ok, ~emb, rec, base, w), Spec.SeqOk{f(u, w)},
+    Laws.pipe_refines_seq(~f, ~ok, ~emb, ~clob, rec, v, base, w), run_true(ok(rec), f(u, w), accepted))
+  +s4 = Equal.cong(Spec.Round, List<&2, U32>, r => Laws.ids_of(r), out, Spec.SeqOk{f(u, w)}, s3)
+  +s5 = Equal.trans(List<&2, U32>, Laws.ids_of(out), f(u, w), tv, s4, conf)
   %Equal.sym(List<&2, U32>, Laws.ids_of(out), tv, s5) : Laws.commits_greedy(~row, seq, t, stops, bp, checkpoint, _)
   TreeLaws.tree_round_commits_greedy(~row, ~rinv, seq, t, stops, bp, checkpoint, legal)
 
@@ -360,4 +362,7 @@ def Laws.pipe_round_commits_greedy(row, rinv, f, ok, emb, rec, v, base, seq, t, 
 # P7: mutation witness
 
 def Laws.unchecked_differs():
+  ({==}, {==}, {==})
+
+def Laws.unrestored_differs():
   ({==}, {==}, {==})

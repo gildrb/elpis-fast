@@ -24,10 +24,17 @@
 # speculative verify's ids are kept. Readback different: the speculative
 # verify is discarded and the round recomputed from expect.
 #
+# w is the committed GDN conv window (conv_state[slot, :, :cdim] of every
+# layer): a history verify reads it and then rewrites the whole conv buffer,
+# window included (~clob), so snapshot() copies it before the speculative
+# verify (saved) and discard() copies it back (restore) before the recompute.
+#
 # Boundaries (not modelled): ~f, the verify's ids as a function of the inputs
-# it reads (everything else fixed: the kernels are deterministic, the
-# speculative verify leaves no state the recompute reads, generator/
-# tree_pipe.py discard); readbacks are faithful copies taken in stream order
+# it reads and the conv window (everything else fixed: the kernels are
+# deterministic; the other state the speculative verify writes, K/V rows past
+# the committed position, the conv history columns and the GDN statics, is
+# rewritten by the recompute before it is read; generator/tree_pipe.py discard
+# restores the host bookkeeping); readbacks are faithful copies taken in stream order
 # after the stage (the host waits on the side stream's event); positions are
 # Nat sums because the host refuses base + 255 >= 2^31; int32 and int64 byte
 # encodings are those of the host's struct.pack.
@@ -141,7 +148,17 @@ def decide(checked: Bool, equal: Bool, kept: List<&2, U32>, redone: List<&2, U32
         case False{}:
           Redone{redone}
 
-def pipe_round(~f: Staged -> List<&2, U32>, ~ok: Record -> Bool, ~emb: Nat -> Nat,
-    +rec: Record, +v: Staged, +base: Nat) -> Outcome:
+# snapshot(): the window copied before the speculative verify runs.
+def saved(+w: List<&2, Nat>) -> List<&2, Nat>:
+  w
+
+# discard(): the window rewritten from the copy (the clobbered one is dropped).
+def restore(+s: List<&2, Nat>, c: List<&2, Nat>) -> List<&2, Nat>:
+  s
+
+def pipe_round(~f: Staged -> List<&2, Nat> -> List<&2, U32>, ~ok: Record -> Bool, ~emb: Nat -> Nat,
+    ~clob: Staged -> List<&2, Nat> -> List<&2, Nat>, +rec: Record, +v: Staged, +base: Nat, +w: List<&2, Nat>)
+  -> Outcome:
   +e = expect(~emb, rec, base)
-  decide(ok(rec), staged_eq(v, e), f(v), f(e))
+  +s = saved(w)
+  decide(ok(rec), staged_eq(v, e), f(v, w), f(e, restore(s, clob(v, w))))

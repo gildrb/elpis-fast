@@ -59,6 +59,12 @@ PINS = {
         "self.stream.wait_event(staged)",
         "self.dev_pinned.copy_(self.tree_dev, non_blocking = True)",
         "self.rows_pinned.copy_(self.rows, non_blocking = True)",
+        # saved / restore: the committed conv window of every GDN layer, copied before the speculative verify
+        # (it rewrites the whole conv buffer) and copied back on discard, before the recompute
+        "save_jobs.append(ext.ConvRewindJob(head, buf.data_ptr(), cs.shape[1], cdim, cs.stride(1)))",
+        "restore_jobs.append(ext.ConvRewindJob(buf.data_ptr(), head, cs.shape[1], cdim, cs.stride(1)))",
+        "device, save_jobs, _ = self._conv_jobs(state) ext.batched_conv_rewind(save_jobs, device)",
+        "device, _, restore_jobs = self._conv_jobs(state) ext.batched_conv_rewind(restore_jobs, device)",
     ],
     "generator/generator.py": [
         # decide: check, then the comparison
@@ -67,6 +73,8 @@ PINS = {
         "same = self.tree_pipe.same(staged, rnd)",
         "except BaseException: self.tree_pipe.discard(snap) raise",
         "if same: return rnd, batch_logits, params",
+        # the snapshot is taken before the speculative verify launch
+        "snap = self.tree_pipe.snapshot(batch_states[0]) batch_logits, params = verify_forward(batch_ids, staged, True)",
         (
             "self.tree_pipe.discard(snap) self._tree_upload(rnd, base, staging_set) "
             "batch_logits, params = verify_forward(self._batch_ids(input_ids_list), None, True)"
