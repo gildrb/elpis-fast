@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "3764dd0b3f7aeb03ae1527142c739f4d79d3412bf1f20be01dcdf1750619d429",
+  "series_sha256": "161247dd973c11f0cd25ec27990f2f5fb8025dfe1902f8a6007a3e0704322910",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -193,6 +193,14 @@
     {
       "name": "5110h-prefill-m4096-membound.patch",
       "sha256": "8e700c48189b0fa779982647eb936641d978c5379c5474fe6bda5f6889b05bab"
+    },
+    {
+      "name": "9503f-qc-staging-round64-fast.patch",
+      "sha256": "bc499a029b8adcb3d2194f27724ca25b78c3a2ca2dac181d0d855af83578a993"
+    },
+    {
+      "name": "9503b-prefill-m4096-stage1088.patch",
+      "sha256": "47a8aea76518df7d1c8cd75a97196147b62ad15422704f9ca62fcb16a500bcb7"
     }
   ],
   "files": {
@@ -450,7 +458,7 @@
     },
     "generator/job.py": {
       "pre": "4564b54b589fa045c9452f4e5e39cb304a090e06714f6f0d2428cbb261eab04b",
-      "post": "81021e82269477c6bd039ab856f8e13c4c860dc0e223da415c87f7df03c7c4fe"
+      "post": "9aef1a824548ac1bfaedbf8741b02be805184cc9b10c3de1345501e0759a5c5e"
     },
     "generator/pagetable.py": {
       "pre": "0cde876b9969df7120ed7137b35bff3040dc3a7613c9f5a9547e58da4a9849ea",
@@ -486,7 +494,7 @@
     },
     "modules/attention_fn/triton_paged.py": {
       "pre": "910379b663acb08711c3be207cd3e9ed96658527cc110a6ce39c793f997836d9",
-      "post": "792a461592bfdadbd3b0f903b9098951e0ce5964c9e860d354e6d5906b331290"
+      "post": "0514a6e990f4b24bb91b15911e20f4564d299cf2367e22cba3323e1d228be184"
     },
     "modules/attn.py": {
       "pre": "92075ee1f8890c014fbf9fb62fecb705dba793ac96dbd794c1d399e284034c26",

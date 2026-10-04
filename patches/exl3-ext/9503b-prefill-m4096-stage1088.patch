@@ -1,0 +1,27 @@
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -30,15 +30,21 @@
+ # Measured (memory probe 0081zr on the p9502t test build, 350 W, 32 new tokens): 131122 tokens merged, 513 pages ->
+ # 1024-page scratch: prefill and first verify round OK, min free 857 MiB; 262052 merged, 1024 pages: OK, min free
+ # 537 MiB; 262136 unmerged, 1025 pages -> 2048-page scratch: min free 37 MiB; 262136 merged past the page bound: OOM.
++# Ext 9503b: bound raised to 1088 pages, the 64-page staging scratch of the largest served block table (262144 tokens
++# of prompt + generation + the 8-token draft margin = 1025 pages), so every native-context request merges. Measured
++# (0081zz8 / 0081zz9 on the p9503t test build, 262136 prompt + 8 tokens): merged at 1088 pages, prefill + verify +
++# decode min headroom 797 MiB, TTFT 428.8 s vs 442.3 s unmerged; prefill state, checkpoints, ids and rounds identical
++# to the unmerged old-rounding control and to the unmerged 1088-page run. With EXL3_QC_STAGING_ROUND64=0 a 1025-page
++# table stages 2048 pages, above the bound, so it keeps the unmerged schedule (the 0081zr OOM case stays excluded).
+ # Both constants are module globals read per chunk
+-M4096_MAX_STAGE_PAGES = 1024
++M4096_MAX_STAGE_PAGES = 1088
+ M4096_MAX_PROMPT = 262143
+ 
+ 
+ def m4096_stage_pages(block_table_pages: int) -> int:
+     """Pages of the attention staging scratch for a single-sequence block table: triton_paged.py's own rounding
+-    (ext 9503: a multiple of 64 pages, 1025 -> 1088; a power of two with EXL3_QC_STAGING_ROUND64=0). The bound stays
+-    1024 pages until a merged run at 1088 is measured, so the merge decision is unchanged for every job"""
++    (ext 9503: a multiple of 64 pages, 1025 -> 1088; a power of two with EXL3_QC_STAGING_ROUND64=0), compared with
++    M4096_MAX_STAGE_PAGES per chunk"""
+     from ..modules.attention_fn.triton_paged import qc_staging_pages
+     return qc_staging_pages(block_table_pages)
+ 

@@ -1,0 +1,80 @@
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -21,8 +21,9 @@
+ 
+ # Ext 5110h: merged 4096-row prefill forwards are bounded by memory. The largest transient of a prefill forward is the
+ # quantized-cache attention staging scratch (modules/attention_fn/triton_paged.py): fp16 K and V over the job's whole
+-# block table rounded up to a power of two in pages, 1 GiB at 1024 pages (<= 262144 tokens of prompt + generation
+-# budget) and 2 GiB from 1025 pages on; a merged forward adds its extra 2048 rows of activations on top. The old 5110g
++# block table rounded up to a power of two in pages (ext 9503: or the multiple of 64 pages if smaller), 1 GiB at
++# 1024 pages (<= 262144 tokens of prompt + generation budget) and 2 GiB (9503: 1088 MiB) from 1025 pages on; a merged
++# forward adds its extra 2048 rows of activations on top. The old 5110g
+ # prompt bound (131072) came from a 262K OOM that was the test harness's own full-KV snapshot gather (0080g4/g5/g7,
+ # fixed in 0080g8), not the engine. Merge only while the scratch is at most M4096_MAX_STAGE_PAGES pages; the prompt
+ # bound M4096_MAX_PROMPT = 262143 (the served context minus the one generated token) excludes nothing on its own.
+@@ -35,8 +36,11 @@
+ 
+ 
+ def m4096_stage_pages(block_table_pages: int) -> int:
+-    """Pages of the attention staging scratch for a single-sequence block table (triton_paged.py's rounding)"""
+-    return max(1, 1 << (block_table_pages - 1).bit_length())
++    """Pages of the attention staging scratch for a single-sequence block table: triton_paged.py's own rounding
++    (ext 9503: a multiple of 64 pages, 1025 -> 1088; a power of two with EXL3_QC_STAGING_ROUND64=0). The bound stays
++    1024 pages until a merged run at 1088 is measured, so the merge decision is unchanged for every job"""
++    from ..modules.attention_fn.triton_paged import qc_staging_pages
++    return qc_staging_pages(block_table_pages)
+ 
+ 
+ def prefill_m4096_enabled() -> bool:
+--- a/modules/attention_fn/triton_paged.py
++++ b/modules/attention_fn/triton_paged.py
+@@ -702,6 +702,29 @@
+ # path reads less gmem (short trailing chunks over long contexts, low bitrates)
+ _qc_prefill_two_pass_min_q = int(os.environ.get("EXL3_QC_PF_TWO_PASS_MIN_Q", "256"))
+ 
++# Ext 9503: the staging scratch is the smaller of the power of two and the multiple of QC_STAGING_ROUND_PAGES pages at or
++# above the block-table span (1025 pages -> 1088, not 2048; spans up to 64 pages keep their power of two, so short jobs
++# do not grow). Its size never reaches a kernel: dequant_cache_paged_window only requires
++# k_out.size(0) >= bsz * block-table width and writes rows (batch * width + page) * page_size + t for tokens below
++# cache_seqlens + bonus_len (cache/q_cache.cu, q_cache_kernels.cuh compact_out); pattn / pattn8 read only through the
++# compact arange block table, keys below cache_seqlens + kv_append_len (the rest are zero-filled cp.async with an
++# in-range address); the Triton fallback takes num_pages_per_seq from block_table.shape[1]. So the launches, their
++# arguments and every byte they read are unchanged; only the allocation shrinks. Kill switch
++# EXL3_QC_STAGING_ROUND64, read per call: unset or "1" = multiples of 64 pages, "0" = power of two, else an error
++QC_STAGING_ROUND_PAGES = 64
++
++
++def qc_staging_pages(pages: int) -> int:
++    """Pages of the prefill staging scratch (fp16 K and V each) for `pages` block-table pages (bsz * width)"""
++    pow2 = max(1, 1 << (pages - 1).bit_length())
++    env = os.environ.get("EXL3_QC_STAGING_ROUND64")
++    if env is None or env == "1":
++        return min(pow2, -(-pages // QC_STAGING_ROUND_PAGES) * QC_STAGING_ROUND_PAGES)
++    if env == "0":
++        return pow2
++    raise ValueError("EXL3_QC_STAGING_ROUND64 must be 0 or 1")
++
++
+ def _get_h32(device):
+     if device not in _h32_cache:
+         h = torch.ones(1, 1, dtype = torch.float32)
+@@ -2242,8 +2265,8 @@
+         # scratch is a per-call transient sized to the referenced window: the block-table span
+         # (a job's pages, not the cache pool), narrowed further when the caller bounds the past
+         # length (QSA's dense regime never sees more than its sparse threshold, so a 512k-token
+-        # pool needs a 2k-token scratch there), and rounded up to a power of two in pages so
+-        # the allocator sees a handful of distinct sizes. Context-shaped workspaces are not
++        # pool needs a 2k-token scratch there), and rounded up to a multiple of 64 pages (ext 9503,
++        # qc_staging_pages; a power of two with EXL3_QC_STAGING_ROUND64=0). Context-shaped workspaces are not
+         # kept as statics: the old pool-sized static held a full fp16 copy of the cache
+         # (1 GiB per 512k tokens on Qwen3.8) for the life of the process
+         if (_qc_staging == 1 and q_len >= _qc_prefill_two_pass_min_q
+@@ -2254,7 +2277,7 @@
+                 npps_w = min(npps_w, -(-(max_kv_len + kv_append_len) // page_size))
+                 block_table = block_table[:, :npps_w].contiguous()
+             n_kvh = n_kv_heads_override
+-            pages_alloc = max(1, 1 << (bsz * npps_w - 1).bit_length())
++            pages_alloc = qc_staging_pages(bsz * npps_w)
+             # Ext 3021: int8 QK^T (exllamav3_ext/pattn8i_kernel.cuh) for 3-bit K caches: the stage pass writes K
+             # as int8 rows (from the cache's H32 codes) + per-key scales and V as dequant_cache_paged_window
+             # would; q is quantised per row in-kernel. Kill switch EXL3_PATTN_INT8_QK
