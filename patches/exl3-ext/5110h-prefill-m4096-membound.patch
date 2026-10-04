@@ -1,0 +1,55 @@
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -19,10 +19,24 @@
+ import os
+ 
+ 
+-# Ext 5110g: merged 4096-row prefill forwards only for prompts of at most 131072 prefilled tokens. At 262K the merged
+-# run's first verify round exceeded the card (0080g4 / 0080g5: 23.17 GiB allocated, OOM; 131073 tokens peaked at
+-# 22.36 GiB either way); longer prompts keep the 2048-row schedule, so their memory and outputs are unchanged
+-M4096_MAX_PROMPT = 131072
++# Ext 5110h: merged 4096-row prefill forwards are bounded by memory. The largest transient of a prefill forward is the
++# quantized-cache attention staging scratch (modules/attention_fn/triton_paged.py): fp16 K and V over the job's whole
++# block table rounded up to a power of two in pages, 1 GiB at 1024 pages (<= 262144 tokens of prompt + generation
++# budget) and 2 GiB from 1025 pages on; a merged forward adds its extra 2048 rows of activations on top. The old 5110g
++# prompt bound (131072) came from a 262K OOM that was the test harness's own full-KV snapshot gather (0080g4/g5/g7,
++# fixed in 0080g8), not the engine. Merge only while the scratch is at most M4096_MAX_STAGE_PAGES pages; the prompt
++# bound M4096_MAX_PROMPT = 262143 (the served context minus the one generated token) excludes nothing on its own.
++# Measured (memory probe 0081zr on the p9502t test build, 350 W, 32 new tokens): 131122 tokens merged, 513 pages ->
++# 1024-page scratch: prefill and first verify round OK, min free 857 MiB; 262052 merged, 1024 pages: OK, min free
++# 537 MiB; 262136 unmerged, 1025 pages -> 2048-page scratch: min free 37 MiB; 262136 merged past the page bound: OOM.
++# Both constants are module globals read per chunk
++M4096_MAX_STAGE_PAGES = 1024
++M4096_MAX_PROMPT = 262143
++
++
++def m4096_stage_pages(block_table_pages: int) -> int:
++    """Pages of the attention staging scratch for a single-sequence block table (triton_paged.py's rounding)"""
++    return max(1, 1 << (block_table_pages - 1).bit_length())
+ 
+ 
+ def prefill_m4096_enabled() -> bool:
+@@ -1309,6 +1323,7 @@
+             if (
+                 self.recurrent_state is not None and not self.embeddings and prefill_m4096_enabled() and
+                 last_tok <= M4096_MAX_PROMPT and
++                m4096_stage_pages(len(seq.allocated_pages)) <= M4096_MAX_STAGE_PAGES and
+                 prefill_start == seq.kv_position and prefill_start % (2 * mc) == 0 and
+                 prefill_end - prefill_start == mc and prefill_end + mc <= last_tok - 2 * mc and mc % PAGE_SIZE == 0
+             ):
+@@ -1324,10 +1339,11 @@
+                     prefill_end = e2
+                     p1 = (prefill_end + PAGE_SIZE - 1) // PAGE_SIZE
+                     self.m4096_merged = True
+-            # The merged forwards leave 4096-row activation blocks in the caching allocator; at 262K context that
+-            # reserve plus the first verify round's allocations exceeded the card (0080g4: OOM right after prefill
+-            # with 22.39 GiB reserved). Once the schedule falls back to single pieces (the last 2 * max_chunk_size
+-            # tokens always do), return the cached blocks to the driver once. Memory bookkeeping only: no numerics
++            # The merged forwards leave 4096-row activation blocks in the caching allocator. PyTorch's own allocations
++            # would get them back anyway (the allocator frees its unused cached blocks and retries before it reports
++            # an OOM), but allocations outside it (cuBLAS workspaces, Triton module loads at a new shape) cannot. Once
++            # the schedule falls back to single pieces (the last 2 * max_chunk_size tokens always do), return the
++            # cached blocks to the driver once. Memory bookkeeping only: no numerics; one device sync per merged job
+             if prefill_end - prefill_start <= mc and getattr(self, "m4096_merged", False):
+                 self.m4096_merged = False
+                 torch.cuda.empty_cache()

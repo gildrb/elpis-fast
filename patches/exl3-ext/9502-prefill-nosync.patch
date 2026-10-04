@@ -1,0 +1,321 @@
+--- a/cache/recurrent.py
++++ b/cache/recurrent.py
+@@ -1,4 +1,5 @@
+ from collections import OrderedDict
++import torch
+ from ..constants import PAGE_SIZE
+ from ..util.memory import malloc_trim
+ 
+@@ -18,6 +19,14 @@
+         malloc_trim()
+ 
+ 
++# Ext 9502 (EXL3_PREFILL_NOSYNC): a checkpoint taken right after a prefill chunk may leave its device-to-host copies
++# in flight (GDNState.stash(defer = True)): the stash dict then holds only its position and size plus this key, whose
++# value is ([CUDA event per device, recorded after the copies], {layer key: (pinned recurrent row, pinned conv)}). The
++# per-layer entries appear only when RecurrentCache.settle() has waited for the event and moved the bytes to pageable
++# host tensors, so an unsettled stash can never be read as a checkpoint (unstash raises on the missing layer key)
++STASH_PENDING = "ext9502_pending"
++
++
+ class RecurrentCache(OrderedDict):
+     def __init__(
+         self,
+@@ -38,25 +47,63 @@
+             "stash_pruned": 0,              # stranded checkpoints dropped by prune_stranded()
+         }
+ 
++        # Ext 9502: deferred stashes not yet settled, as (round, stash dict), and the generator's iterate counter
++        self.pending = []
++        self.round = 0
++
++
++    def begin_round(self):
++        """Ext 9502: the generator starts an iterate; stashes deferred from now on belong to the new round"""
++        self.round += 1
++
++
++    def settle(self, before_round: int | None = None):
++        """
++        Ext 9502: complete deferred checkpoints (all of them, or those taken before `before_round`): wait for each
++        one's copy event, then store the layers' bytes as pageable host tensors, exactly what the blocking stash
++        returns. The generator settles a round's stashes after the next round's prefill forwards are queued, so the
++        wait does not idle the GPU; every reader of stash contents settles first.
++        """
++        keep = []
++        for rnd, stashed in self.pending:
++            if before_round is not None and rnd >= before_round:
++                keep.append((rnd, stashed))
++                continue
++            events, pinned = stashed.pop(STASH_PENDING)
++            for event in events:
++                event.synchronize()
++            for k, (s, c) in pinned.items():
++                rec = torch.empty(s.shape, dtype = s.dtype)
++                conv = torch.empty(c.shape, dtype = c.dtype)
++                rec.copy_(s)
++                conv.copy_(c)
++                stashed[k] = (rec, conv)
++        self.pending = keep
++
+ 
+     def get_stashed(self, key, default = None):
+         """
+         Fetch state from cache and move it to the end of the queue
+         """
++        self.settle()
+         if key in self:
+             self.move_to_end(key)
+             return self[key]
+         return default
+ 
+ 
+-    def put(self, key, state):
++    def put(self, key, state, defer: bool = False):
+         """
+-        Add state to cache
++        Add state to cache. defer (ext 9502, GDN states only): leave the device-to-host copies in flight; the stash
++        is settled by settle() before anything reads it
+         """
++        self.settle(self.round)
+         if key in self:
+             self.move_to_end(key)
+         else:
+-            stashed_state = state.stash()
++            stashed_state = state.stash(defer = True) if defer else state.stash()
++            if STASH_PENDING in stashed_state:
++                self.pending.append((self.round, stashed_state))
+             state_size = stashed_state["checkpoint_size"]
+             while self.update_total_size() + state_size > self.max_size:
+                 assert self.current_size >= 0, "Not enough space in cache for single state"
+@@ -98,6 +145,8 @@
+         no extra cost, so this only frees system RAM that would otherwise sit dead until LRU pressure reaches it.
+         Intended to be called when the generator goes idle.
+         """
++        # Ext 9502: the generator is idle here; no checkpoint copy stays in flight past this point
++        self.settle()
+         if self.pagetable is None:
+             return 0
+         stranded = [k for k in self if not self.pagetable.is_resumable(k)]
+--- a/generator/generator.py
++++ b/generator/generator.py
+@@ -626,6 +626,8 @@
+             "Draft cache tensors were never allocated. Construct the draft Cache BEFORE calling draft_model.load()"
+ 
+         results = []
++        if self.recurrent_cache is not None:
++            self.recurrent_cache.begin_round()
+         self.iterate_start_jobs(results)
+ 
+         # Perform one round of prefill
+@@ -688,6 +690,9 @@
+ 
+ 
+     def recurrent_checkpoint(self):
++        # Ext 9502: the checkpoint copies deferred by earlier iterates are complete by now or queued ahead of this
++        # iterate's prefill forwards, so waiting for them here does not idle the GPU (cache/recurrent.py)
++        self.recurrent_cache.settle(self.recurrent_cache.round)
+         for job in self.active_jobs:
+             job.maybe_stash_recurrent(self.recurrent_cache)
+ 
+--- a/generator/job.py
++++ b/generator/job.py
+@@ -35,6 +35,20 @@
+         return False
+     raise ValueError("EXL3_PREFILL_M4096 must be 0 or 1")
+ 
++
++def prefill_nosync_enabled() -> bool:
++    """Ext 9502 kill switch EXL3_PREFILL_NOSYNC: unset or "1" = on, "0" = off, anything else is an error (read per
++    prefill call). On, a prefill chunk never blocks the host on the GPU: the chunk's block table, cache length and
++    embedded rows go up from pinned host memory without a stream synchronization, and the recurrent checkpoint taken
++    after it leaves its device-to-host copies in flight until the next iterate (cache/recurrent.py). The same kernels
++    and copies run in the same order on the same stream; only when the host waits changes."""
++    env = os.environ.get("EXL3_PREFILL_NOSYNC")
++    if env is None or env == "1":
++        return True
++    if env == "0":
++        return False
++    raise ValueError("EXL3_PREFILL_NOSYNC must be 0 or 1")
++
+ # Convert list of strings to UTF32 format to pass by reference to partial matching function
+ @lru_cache(100)
+ def _strings_to_utf32(strings: tuple[str]) -> tuple[np.ndarray, np.ndarray] | None:
+@@ -325,6 +339,9 @@
+         # Recurrent state
+         self.recurrent_state = None
+         self.last_recurrent_checkpoint_pos = None
++        # Ext 9502: this iterate's prefill() ran a forward with EXL3_PREFILL_NOSYNC on, so the checkpoints taken
++        # after it may defer their copies
++        self.stash_defer = False
+ 
+         # Loop detector
+         self.loop_detector = None
+@@ -1234,6 +1251,8 @@
+             self.time_first_prefill = time.time()
+ 
+         progress = 0
++        nosync = prefill_nosync_enabled()
++        self.stash_defer = False
+ 
+         for seq in self.sequences:
+             if seq.prefill_complete:
+@@ -1434,16 +1453,27 @@
+                         ids, self.embeddings, ids.shape[-1]
+                     )
+ 
++                if nosync:
++                    # Ext 9502: pinned copies from the caching host allocator (a fresh block per chunk, reused only
++                    # after its upload's recorded event), so get_for_device uploads them without a stream
++                    # synchronization; the embedding module stages the embedded rows the same way (pinned_upload)
++                    block_table = seq.block_index_tensor.pin_memory()
++                    cache_seqlens = torch.tensor([prefill_start], dtype = torch.int32).pin_memory()
++                else:
++                    block_table = seq.block_index_tensor
++                    cache_seqlens = torch.tensor([prefill_start], dtype = torch.int32)
+                 params = {
+                     "attn_mode": "flash_attn",
+-                    "block_table": seq.block_index_tensor,
++                    "block_table": block_table,
+                     "cache": self.generator.cache,
+-                    "cache_seqlens": torch.tensor([prefill_start], dtype = torch.int32),
++                    "cache_seqlens": cache_seqlens,
+                     "recurrent_states": [self.recurrent_state] if self.recurrent_state is not None else None,
+                     "indexed_embeddings": self.embeddings,
+                     "inv_freq": self.alt_rope_freqs,
+                     "mm_span_prefix": mm_span_prefix,
+                 }
++                if nosync:
++                    params["pinned_upload"] = True
+                 if self.generator.draft_model:
+                     params.update(self.generator.draft_model.draft_verifier_params)
+                 if self.generator.mtp_draft:
+@@ -1464,7 +1494,7 @@
+                         target_hidden = params.get("export_states"),
+                         cache = self.generator.draft_cache,
+                         params = {
+-                            "block_table": seq.block_index_tensor,
++                            "block_table": block_table,
+                             "cache_seqlens": params["cache_seqlens"],
+                         }
+                     )
+@@ -1522,6 +1552,12 @@
+                 if self.sequences[0].kv_position >= len(seq.sequence_ids) - 1:
+                     seq.prefill_complete = True
+ 
++                # Ext 9502: checkpoints taken after this forward (below, and Generator.recurrent_checkpoint) leave
++                # their copies in flight when the switch is on and the state supports it
++                self.stash_defer = (
++                    nosync and getattr(self.recurrent_state, "can_defer_stash", False) and
++                    not self.generator.model.loaded_tp
++                )
+                 if recurrent_last_page:
+                     self.maybe_stash_recurrent(self.generator.recurrent_cache, PAGE_SIZE)
+ 
+@@ -1675,7 +1711,7 @@
+ 
+             page = seq.allocated_pages[last_page]
+             assert page.kv_position == PAGE_SIZE
+-            cache.put(page.phash, self.recurrent_state)
++            cache.put(page.phash, self.recurrent_state, defer = self.stash_defer)
+ 
+             # Prevent setting the same checkpoint twice in a row if prefill ends on the first page of a chunk
+             self.last_recurrent_checkpoint_pos = seq.kv_position
+--- a/generator/persist.py
++++ b/generator/persist.py
+@@ -673,6 +673,9 @@
+         with torch.inference_mode():
+             if self.segments and self.segments[0].device.type == "cuda":
+                 torch.cuda.synchronize(self.segments[0].device)
++            # Ext 9502: complete any checkpoint whose copies were deferred, so every stash carries its layers
++            self.rc.settle()
++            _require(not self.rc.pending, "deferred checkpoints left unsettled")
+             ordered, stashes, skipped = self.anchored()
+             key = bytes.fromhex(self.key)
+ 
+--- a/modules/embedding.py
++++ b/modules/embedding.py
+@@ -165,6 +165,10 @@
+                     self._pinned_staging[key] = buf
+                 buf.copy_(x)
+                 x = buf
++            # Ext 9502 (prefill without a sync point between forwards): a fresh pinned block per call from the
++            # caching host allocator, which reuses it only after the upload's recorded event has completed
++            elif params.get("pinned_upload") and x.device.type == "cpu":
++                x = x.pin_memory()
+             return x
+ 
+     def make_tp_allocation(self, options: dict) -> list[TPAllocation]:
+--- a/modules/gated_delta_net.py
++++ b/modules/gated_delta_net.py
+@@ -36,6 +36,7 @@
+     mp_cache_recurrent_unstash,
+     mp_cache_recurrent_clear,
+     new_checkpoint_handle,
++    STASH_PENDING,
+ )
+ from ..util import profile_opt
+ from .attention_fn.bc_attn import MAX_BSZ as _BC_MAX_BSZ, MAX_QLEN as _BC_MAX_QLEN
+@@ -89,6 +90,8 @@
+ 
+ 
+ class GDNState:
++    # Ext 9502: stash(defer = True) is supported (RecurrentCache.put)
++    can_defer_stash = True
+ 
+     def __init__(
+         self,
+@@ -147,12 +150,25 @@
+         return 0
+ 
+ 
+-    def stash(self):
++    def stash(self, defer: bool = False):
+         stashed = {
+             "position": self.position,
+             "checkpoint_size": self.checkpoint_size
+         }
+-        if not self.cache.model.loaded_tp:
++        if defer:
++            # Ext 9502: the same copies in the same stream order, into pinned host memory without waiting; the event
++            # marks their completion and RecurrentCache.settle() installs the layer entries (cache/recurrent.py)
++            if self.cache.model.loaded_tp:
++                raise RuntimeError("GDNState: a deferred stash needs a local (non-TP) cache")
++            layers = self.cache.get_all_recurrent_layers()
++            pinned = {k: l.stash(self.slot, pinned = True) for k, l in layers.items()}
++            events = []
++            for dev in {l.recurrent_state.device for l in layers.values()}:
++                event = torch.cuda.Event()
++                event.record(torch.cuda.current_stream(dev))
++                events.append(event)
++            stashed[STASH_PENDING] = (events, pinned)
++        elif not self.cache.model.loaded_tp:
+             for k, l in self.cache.get_all_recurrent_layers().items():
+                 stashed[k] = l.stash(self.slot)
+         else:
+@@ -381,13 +397,20 @@
+         return self.replay_job(slot, last_history + 1 - num_tokens)
+ 
+ 
+-    def stash(self, slot, position: int = 0):
++    def stash(self, slot, position: int = 0, pinned: bool = False):
+         self.commit_pending((slot,))
+         cdim = self.module.conv_kernel_size
+-        return (
+-            self.recurrent_state[slot, :1].cpu(),
+-            self.conv_state[slot, :, :cdim].cpu()
+-        )
++        rec = self.recurrent_state[slot, :1]
++        conv = self.conv_state[slot, :, :cdim]
++        if pinned:
++            # Ext 9502: .cpu()'s copies (a contiguous staging copy for the strided conv columns, then the transfer)
++            # without its stream synchronization; the caller records the completion event
++            rec_h = torch.empty(rec.shape, dtype = rec.dtype, pin_memory = True)
++            conv_h = torch.empty(conv.shape, dtype = conv.dtype, pin_memory = True)
++            rec_h.copy_(rec, non_blocking = True)
++            conv_h.copy_(conv, non_blocking = True)
++            return rec_h, conv_h
++        return rec.cpu(), conv.cpu()
+ 
+ 
+     def unstash(self, slot, stashed, position: int = 0):

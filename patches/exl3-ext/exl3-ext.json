@@ -14,9 +14,9 @@
   },
   "extension": {
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
-    "base_sha256": "6d30690fdb76b3c4ad3fb5e69f0479707e410fc9b6194e2a5e32f4d7fe1fd8b3"
+    "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "84be696d5c43df37c3dea134515b7810c5651015b21f1d6cc874ad4aba025a58",
+  "series_sha256": "3764dd0b3f7aeb03ae1527142c739f4d79d3412bf1f20be01dcdf1750619d429",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -185,6 +185,14 @@
     {
       "name": "9501b-prefix-persist.patch",
       "sha256": "88be64623fac7fdc91a9b2c0d87dfd2a2a837aef24dba315628c663f45f51b02"
+    },
+    {
+      "name": "9502-prefill-nosync.patch",
+      "sha256": "12c6dd4ca3042f8732b7534d5f5a038c3d487b7f81b899d37d5ae1626dbd9a22"
+    },
+    {
+      "name": "5110h-prefill-m4096-membound.patch",
+      "sha256": "8e700c48189b0fa779982647eb936641d978c5379c5474fe6bda5f6889b05bab"
     }
   ],
   "files": {
@@ -199,6 +207,10 @@
     "cache/kv_compact.py": {
       "pre": null,
       "post": "8c6bdd61f82097632b33fb9756cb6bf6b230175e212796bb34f0d40cefd52342"
+    },
+    "cache/recurrent.py": {
+      "pre": "5bdc3e1ea71a6f8b4765edb7db5b50c25146f8f64967228cab19c52fbed3c1cb",
+      "post": "b95f6442584b52acaf305b89b27ea5fac780363a9dc11179554f807827a3da0d"
     },
     "exllamav3_ext/attn_small.cu": {
       "pre": null,
@@ -432,9 +444,13 @@
       "pre": "08bf319ae372a26cb85d3a39896e0001bf2d3dbe4c9adf21bb58012c8eedb49a",
       "post": "0f4a84912f823328e4501784ebcfac24f6e9cb475ae64fa647d5d127139cc940"
     },
+    "generator/generator.py": {
+      "pre": "ee378f92cbe59fbe4c18739e1ff75c366d084f8460279f8ed69f3b3aa123a232",
+      "post": "60b2ab0e234b37ca3a153f44506cc13a3c300173028e301875c94cc911f09b57"
+    },
     "generator/job.py": {
       "pre": "4564b54b589fa045c9452f4e5e39cb304a090e06714f6f0d2428cbb261eab04b",
-      "post": "33b9bfec6affc2a9fed2f4ce7b8653eb681b569e23e4eb31d0f502c6934ba600"
+      "post": "81021e82269477c6bd039ab856f8e13c4c860dc0e223da415c87f7df03c7c4fe"
     },
     "generator/pagetable.py": {
       "pre": "0cde876b9969df7120ed7137b35bff3040dc3a7613c9f5a9547e58da4a9849ea",
@@ -442,7 +458,7 @@
     },
     "generator/persist.py": {
       "pre": null,
-      "post": "efab2124d6236b3b58d13c227695a7789f1eaf647b5aaddcdbe21e4bf14fd263"
+      "post": "81a0213fe02399b84df5f051fbd23f0d6c02774f61c209f4c14b40fb81bba264"
     },
     "model/model.py": {
       "pre": "013edc062e64d8fad98695491dd3fd504723752377db7e8f338c88e5afb85448",
@@ -476,9 +492,13 @@
       "pre": "92075ee1f8890c014fbf9fb62fecb705dba793ac96dbd794c1d399e284034c26",
       "post": "27080f57092ecdbfa16381bdbded479b8d9956bb5b101ba96ca90b6952600b30"
     },
+    "modules/embedding.py": {
+      "pre": "11e0075c96988503ef19b46b91e072d281b44fb53385d38d275c7ff00bcecd89",
+      "post": "49c9fc0e0b97784d4f27bc601e3a9a3c4e887dd75e97af4b09e2f51c8f2b4bcd"
+    },
     "modules/gated_delta_net.py": {
       "pre": "955f2ae25509ccf695dac4b79721115bc51d9d63a7f6f1eeb0a42671b685cf5a",
-      "post": "9406854360bba686f16eb4a9a874bd909b87ec5ff90ff5951619f808bc28f24f"
+      "post": "c887e272e5733d02bb38dce7d11ccf47ed473e67d8bf90b9713850d280314ea8"
     },
     "modules/gated_delta_net_fn/conv1d.py": {
       "pre": "a08e99093b0d76e33cf256931ad027b019404caf7b92ffd07b2d84b8187c0452",

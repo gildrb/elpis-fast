@@ -11,15 +11,20 @@ patches/exl3/apply.py):
 
 prepare checks the installed engine against exl3-ext.json: the package root, the
 SHA-256 listing of the whole compiled source tree, and the vendored upstream
-setup.py. For `patched` it then checks the series, every patch and every pre-image,
-applies the series in place with the strict hunk rules of patches/exl3/apply.py,
-and requires every post-image. Finally it lays out <build-root> like the upstream
-checkout (setup.py plus exllamav3/exllamav3_ext) for the compiler.
+setup.py. The installed shared object must equal the hash that the base image
+recorded for its own build (extension.base_record, written by
+docker/base/manifest.py; nvcc output differs from build to build, so no global
+pin exists). For `patched` it then checks the series, every patch and every
+pre-image, applies the series in place with the strict hunk rules of
+patches/exl3/apply.py, and requires every post-image. Finally it lays out
+<build-root> like the upstream checkout (setup.py plus exllamav3/exllamav3_ext)
+for the compiler.
 
 compose prints the image's engine manifest: the patches/exl3 manifest with its
 per-file closure extended by the extension's patched files, schema 2, plus an
-`extension` record naming the variant, source and toolchain pins, the series and
-the SHA-256 of the built shared object.
+`extension` record naming the variant, source and toolchain pins, the series, the
+base build's recorded shared object hash and the SHA-256 of the built shared
+object.
 
 record recomposes that manifest from the installed shared object, requires the
 installed manifest to be patches/exl3's, rehashes every recorded file and the
@@ -77,6 +82,8 @@ KEYS = {
 }
 SOURCE_KEYS = {"revision", "root", "tree", "tree_sha256", "setup_py", "setup_py_sha256"}
 VARIANTS = ("rebuilt", "patched")
+# Commit time of 355c6ee10fbd25b79070316a81ea0708cc18155a (2026-09-17T16:34:03Z).
+SOURCE_MTIME = 1789662843
 
 
 def mapping(value: object, label: str) -> dict[str, object]:
@@ -122,6 +129,21 @@ def tree_digest(root: Path) -> str:
             lines.append(f"{digest(path)}  {relative.as_posix()}\n")
     require(bool(lines), f"empty source tree {root}")
     return hashlib.sha256("".join(lines).encode()).hexdigest()
+
+
+def base_extension(extension: dict[str, object]) -> tuple[Path, str]:
+    """Read the shared object hash that the base image recorded for its build.
+
+    Returns:
+        The extension path and its recorded sha256.
+    """
+    path = text_value(extension["path"], "extension path")
+    source = Path(text_value(extension["base_record"], "base record"))
+    record = mapping(json.loads(source.read_bytes()), "base record")
+    require(record.get("schema") == 1, "unsupported base record schema")
+    recorded = mapping(record.get("per_build"), "base per-build record")
+    require(path in recorded, "the base record does not name the extension")
+    return Path(path), pinned(recorded[path], "recorded base extension sha256")
 
 
 def engine_root(source: dict[str, object]) -> Path:
@@ -314,10 +336,10 @@ def prepare(variant: str, build: Path) -> None:
         "vendored setup.py differs from its pin",
     )
     extension = mapping(manifest["extension"], "extension")
+    so, base_sha256 = base_extension(extension)
     require(
-        digest(Path(text_value(extension["path"], "extension path")))
-        == pinned(extension["base_sha256"], "base_sha256"),
-        "installed extension differs from the pinned base build",
+        digest(so) == base_sha256,
+        "installed extension differs from the base image's recorded build",
     )
     if variant == "patched":
         apply_series(manifest, root)
@@ -333,6 +355,11 @@ def prepare(variant: str, build: Path) -> None:
             destination.mkdir()
         else:
             _ = destination.write_bytes(path.read_bytes())
+    # ptxas writes each source file's mtime into the -lineinfo line table. Use the
+    # commit time of the pinned revision (the mtime in its commit tarball, as in the
+    # base build) so the build does not depend on when prepare ran.
+    for path in [build, *build.rglob("*")]:
+        os.utime(path, (SOURCE_MTIME, SOURCE_MTIME), follow_symlinks=False)
     print(f"Prepared {variant} exllamav3_ext sources at {build}")
 
 
@@ -355,12 +382,14 @@ def compose(variant: str, so_sha256: str) -> bytes:
         name: mapping(record, name)
         for name, record in mapping(engine["files"], "files").items()
     }
+    so, base_sha256 = base_extension(mapping(manifest["extension"], "extension"))
     record: dict[str, object] = {
         "variant": variant,
         "source": source,
         "toolchain": mapping(manifest["toolchain"], "toolchain"),
         "shared_object": {
-            **mapping(manifest["extension"], "extension"),
+            "path": str(so),
+            "base_sha256": base_sha256,
             "sha256": pinned(so_sha256, "built extension sha256"),
         },
         "series_sha256": None,
