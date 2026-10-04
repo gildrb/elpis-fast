@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# CPU-only image build. Never pull or retag the existing native EXL3 base.
+# CPU-only image build with no network in any RUN. Never pulls or retags the base.
+# The base is the source-built qwen-elpis:exl3-base (docker/build-base.sh), or the
+# tag in EXL3_BASE_IMAGE. Its identity is its content manifest, not its image ID.
 #   baseline          - installed engine unchanged
 #   candidate         - baseline + the sha-pinned patches/exl3 series and proven acceptance artifact
 #   candidate-rebuilt - candidate + exllamav3_ext recompiled from the unpatched pinned sources
@@ -7,26 +9,48 @@
 set -euo pipefail
 umask 077
 variants=(baseline candidate candidate-rebuilt candidate-ext)
-if (( $# != 2 )) || [[ ! " ${variants[*]} " == *" $1 "* ]]; then
-  echo "Usage: bash docker/build-exl3.sh <${variants[*]// /|}> <output-image-tag>" >&2
+valid=0
+for candidate_variant in "${variants[@]}"; do
+  [[ "${1:-}" == "$candidate_variant" ]] && valid=1
+done
+if (( $# != 2 || ! valid )); then
+  choices="${variants[*]}"
+  echo "Usage: bash docker/build-exl3.sh <${choices// /|}> <output-image-tag>" >&2
   exit 1
 fi
 variant="$1"
 image="$2"
-base=qwen-elpis:exl3-native-comparison
-expected=sha256:b35314f48c7684b4c9cf3d59f4c21395316aa1fc0925db782f460005aa2602ff
+base="${EXL3_BASE_IMAGE:-qwen-elpis:exl3-base}"
 root="$(realpath -- "$(dirname -- "${BASH_SOURCE[0]}")/..")"
+serve_wheels="$root/build/base-inputs/serve-wheels"
+if [[ ! -d "$serve_wheels" ]]; then
+  echo "Missing $serve_wheels: run bash docker/fetch-base.sh first." >&2
+  exit 1
+fi
+pinned="$(python3 -I -B -c '
+import json, re, sys
+pin = json.load(open(sys.argv[1], "rb"))["content_sha256"]
+if not isinstance(pin, str) or not re.fullmatch(r"[0-9a-f]{64}", pin):
+    sys.exit("build-exl3.sh: bad content_sha256 pin")
+print(pin)
+' "$root/docker/base/engine-manifest.json")"
+base_id="$(docker image inspect --format '{{.Id}}' "$base")"
 existing_id="$(docker image ls --no-trunc --format '{{.ID}}' --filter "reference=$image")"
-if [[ "$existing_id" == "$expected" ]]; then
-  echo "Refusing to overwrite a tag of the immutable native base image." >&2
+if [[ "$image" == "$base" || "$existing_id" == "$base_id" ]]; then
+  echo "Refusing to overwrite a tag of the base image." >&2
+  exit 1
+fi
+epoch="$(git -C "$root" log -1 --format=%ct HEAD)"
+if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+  echo "Refusing EXL3 build: no commit time for SOURCE_DATE_EPOCH." >&2
   exit 1
 fi
 
+# The base tag must name the same image before and after the build. This detects
+# ordinary retagging during the build; the content manifest is the identity.
 check_base() {
-  local actual
-  actual="$(docker image inspect --format '{{.Id}}' "$base")"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "Refusing EXL3 build: existing local base image differs from the pinned ID." >&2
+  if [[ "$(docker image inspect --format '{{.Id}}' "$base")" != "$base_id" ]]; then
+    echo "Refusing EXL3 build: the base tag moved during the build." >&2
     exit 1
   fi
 }
@@ -36,7 +60,10 @@ label() {
 }
 
 build() {
-  DOCKER_BUILDKIT=1 docker build --builder default --pull=false \
+  DOCKER_BUILDKIT=1 docker buildx build --builder default --pull=false --network=none \
+    --provenance=false --sbom=false \
+    --build-arg "BASE=$base" --build-arg "SOURCE_DATE_EPOCH=$epoch" \
+    --build-context "serve-wheels=$serve_wheels" \
     --file "$root/Dockerfile.exl3" "${build_args[@]}" "$@" "$root"
 }
 
@@ -59,6 +86,20 @@ fi
 check_base
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "$scratch"' EXIT
+# Phase zero: manifest.py recomputes the base's content listing and per-build
+# hashes inside the base and requires its own record; the content sha256 must
+# equal the tracked pin. It becomes the image's base-manifest label.
+build --target base-manifest --output "type=local,dest=$scratch/base"
+base_sha="$(python3 -I -B -c '
+import json, sys
+print(json.load(open(sys.argv[1], "rb"))["content_sha256"])
+' "$scratch/base/base-manifest.json")"
+if [[ "$base_sha" != "$pinned" ]]; then
+  printf 'Refusing EXL3 build: base content manifest %s differs from the pin %s.\n' \
+    "$base_sha" "$pinned" >&2
+  exit 1
+fi
+build_args+=(--build-arg "BASE_MANIFEST_SHA256=$base_sha")
 if [[ "$variant" == candidate-rebuilt || "$variant" == candidate-ext ]]; then
   # Both phases read the patch tools from one snapshot (named build context
   # `patches`), so concurrent repository edits cannot split them. Phase one
@@ -82,11 +123,16 @@ if [[ "$variant" == candidate-rebuilt || "$variant" == candidate-ext ]]; then
   patches_sha="${patches_sha%% *}"
   build_args+=(--build-arg "EXL3_ENGINE_MANIFEST_SHA256=$patches_sha")
 fi
-build --target "$variant" --iidfile "$scratch/image-id"
+build --target "$variant" --output type=image,rewrite-timestamp=true,unpack=false \
+  --metadata-file "$scratch/build.json"
 check_base
-built_id="$(< "$scratch/image-id")"
+# With rewrite-timestamp the image ID is the digest of the rewritten manifest.
+built_id="$(python3 -I -B -c '
+import json, sys
+print(json.load(open(sys.argv[1], "rb"))["containerimage.digest"])
+' "$scratch/build.json")"
 if [[ ! "$built_id" =~ ^sha256:[0-9a-f]{64}$ ||
-      "$(label "$built_id" io.elpis.exl3.base-image-id)" != "$expected" ||
+      "$(label "$built_id" io.elpis.exl3.base-manifest-sha256)" != "$pinned" ||
       "$(label "$built_id" io.elpis.exl3.variant)" != "$variant" ||
       "$(label "$built_id" io.elpis.exl3.patches-sha256)" != "$patches_sha" ]]; then
   echo "Refusing EXL3 build: missing output identity or baked provenance." >&2
@@ -94,5 +140,5 @@ if [[ ! "$built_id" =~ ^sha256:[0-9a-f]{64}$ ||
 fi
 # Publish the local tag only after both base checks and build succeed.
 docker image tag "$built_id" "$image"
-printf 'Built %s %s as %s from authenticated local base %s\n' \
-  "$variant" "$built_id" "$image" "$expected"
+printf 'Built %s %s as %s from base %s (content manifest %s)\n' \
+  "$variant" "$built_id" "$image" "$base" "$pinned"

@@ -2,6 +2,7 @@
 **
 !Dockerfile.exl3
 !docker/entrypoint.sh
+!docker/base/manifest.py
 !serve/exl3-entrypoint.sh
 !serve/exl3_server.py
 !serve/exl3-requirements.txt

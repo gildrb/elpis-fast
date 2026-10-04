@@ -10,7 +10,7 @@ in {
     stateRoot = lib.mkOption {
       type = lib.types.externalPath;
       default = "/srv/ai/models/qwen3.8-27b";
-      description = "Existing private state, models, key, cache and lock. Host-provisioned.";
+      description = "Existing private state, models, key, cache, prefix-cache and lock. Host-provisioned.";
     };
     requiredMountPoint = lib.mkOption {
       type = lib.types.nullOr lib.types.externalPath;

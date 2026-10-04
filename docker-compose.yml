@@ -21,9 +21,10 @@ services:
     environment:
       # Explicit acknowledgment, not a claim of capacity, quality or performance.
       QWEN_ALLOW_UNQUALIFIED: ${QWEN_ALLOW_UNQUALIFIED:-0}
-      # Persistent prefix cache (/prefix-cache below): 0 turns it off. The cache is bound to the
-      # image ID, taken from the guardian launch gate or, for this plain launch, QWEN_IMAGE_ID
-      # (the full sha256 of QWEN_IMAGE); without either it stays off.
+      # Persistent prefix cache (/prefix-cache below): 0 turns it off; only candidate-ext images
+      # carry its engine, so other variants need 0. The cache is bound to the image ID, taken from
+      # the guardian launch gate or, for this plain launch, QWEN_IMAGE_ID (the full image ID
+      # sha256:<64 hex> of QWEN_IMAGE); without either it stays off.
       QWEN_PREFIX_PERSIST: ${QWEN_PREFIX_PERSIST:-1}
       QWEN_IMAGE_ID: ${QWEN_IMAGE_ID:-}
     healthcheck:

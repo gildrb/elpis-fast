@@ -1,8 +1,12 @@
 # Local EXL3 engine (community exllamav3 355c6ee) and its native DFlash2 extension.
-# Build only via docker/build-exl3.sh: the base tag must resolve to the ID below.
-# Its recorded RepoDigest is not a downloadable registry manifest.
+# Build only via docker/build-exl3.sh. The base is the source-built image of
+# docker/base/ (docker/fetch-base.sh, then docker/build-base.sh). build-exl3.sh
+# authenticates it by its content manifest (target base-manifest), not by image ID.
+# No RUN has network access: the serve wheels come from the `serve-wheels` build
+# context that docker/fetch-base.sh fills and checks.
 #
 # Targets:
+#   base-manifest     - the base's content record, checked against the base.
 #   baseline          - the installed engine unchanged.
 #   candidate         - baseline plus the sha-pinned patches/exl3 series, which commits
 #                       greedy speculative verification through the proven Bend
@@ -14,15 +18,36 @@
 # The two extension targets are built in two docker/build-exl3.sh phases: the
 # ext-*-manifest stage exports the composed engine manifest, whose SHA-256 then
 # becomes the final image's patch label.
-FROM qwen-elpis:exl3-native-comparison AS baseline
-LABEL io.elpis.exl3.base-image-id="sha256:b35314f48c7684b4c9cf3d59f4c21395316aa1fc0925db782f460005aa2602ff"
+ARG BASE=qwen-elpis:exl3-base
+ARG SOURCE_DATE_EPOCH
+
+# manifest.py recomputes the content listing and the per-build hashes and requires
+# them to equal the record that the base build wrote.
+FROM ${BASE} AS base-manifest-run
+USER root
+RUN --network=none \
+    --mount=type=bind,source=docker/base/manifest.py,target=/tmp/manifest.py \
+    /opt/venv/bin/python -I -B /tmp/manifest.py check /opt/elpis-base-manifest.json \
+      > /base-manifest.json
+
+FROM scratch AS base-manifest
+COPY --from=base-manifest-run /base-manifest.json /
+
+FROM ${BASE} AS baseline
+# Must equal the content_sha256 pin of docker/base/engine-manifest.json;
+# build-exl3.sh checks the exported record and re-checks this label.
+ARG BASE_MANIFEST_SHA256=
+ARG SOURCE_DATE_EPOCH
+LABEL io.elpis.exl3.base-manifest-sha256="${BASE_MANIFEST_SHA256}"
 LABEL io.elpis.exl3.variant="baseline"
 
 USER root
 COPY serve/exl3-requirements.txt /opt/qwen/serve/exl3-requirements.txt
-RUN /opt/venv/bin/python -B -m ensurepip --upgrade && \
-    /opt/venv/bin/python -B -m pip --isolated install --no-cache-dir \
-      --require-hashes --only-binary=:all: \
+RUN --network=none \
+    --mount=type=bind,from=serve-wheels,target=/tmp/serve-wheels \
+    /opt/venv/bin/python -B -m ensurepip --upgrade && \
+    /opt/venv/bin/python -B -m pip --isolated install --no-cache-dir --no-index \
+      --find-links /tmp/serve-wheels --require-hashes --only-binary=:all: \
       --requirement /opt/qwen/serve/exl3-requirements.txt
 COPY docker/entrypoint.sh /opt/qwen/docker/entrypoint.sh
 COPY serve/exl3-entrypoint.sh /opt/qwen/serve/entrypoint.sh
@@ -62,7 +87,7 @@ COPY build/bend-exl3/ /opt/qwen/bend-exl3/
 # post-image and acceptance-artifact pin, and records the manifest in the image.
 # Admission (artifact identity plus exhaustive differential against the Bend
 # specification table) must then pass here, and again at every server start.
-RUN --mount=type=bind,source=patches/exl3,target=/tmp/exl3-patches \
+RUN --network=none --mount=type=bind,source=patches/exl3,target=/tmp/exl3-patches \
     chown -R root:root /opt/qwen/bend-exl3 && chmod -R a=rX /opt/qwen/bend-exl3 && \
     echo "${EXL3_PATCHES_SHA256}  /tmp/exl3-patches/exl3-patches.json" | sha256sum --check --strict && \
     /opt/venv/bin/python -I -B /tmp/exl3-patches/apply.py /tmp/exl3-patches /opt/qwen/exl3-patches.json && \
@@ -73,35 +98,37 @@ RUN --mount=type=bind,source=patches/exl3,target=/tmp/exl3-patches \
 ENV QWEN_EXL3_VARIANT=candidate
 USER runner
 
-# Compiler stage: the devel image of the original r0b0tlab build, with the
-# candidate's exact interpreter and venv (torch 2.10.0+cu130, setuptools, ninja).
+# Compiler stage: the devel image of the base build stage (same digest, same
+# g++ 13.3.0-6ubuntu2~24.04, no apt step), with the candidate's exact interpreter
+# and venv (torch 2.10.0+cu130, setuptools, ninja) and the base's per-build record.
 FROM nvidia/cuda:13.0.0-devel-ubuntu24.04@sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d AS ext-toolchain
+ARG SOURCE_DATE_EPOCH
 ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST=8.6 \
     MAX_JOBS=16 \
     PATH=/opt/venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-RUN apt-get update && apt-get install -y --no-install-recommends g++ && \
-    rm -rf /var/lib/apt/lists/*
 COPY --from=candidate /opt/uv-python /opt/uv-python
 COPY --from=candidate /opt/venv /opt/venv
+COPY --from=candidate /opt/elpis-base-manifest.json /opt/elpis-base-manifest.json
 
 # The extension stages and targets read the patch tools from the `patches` named build
 # context: build-exl3.sh snapshots patches/exl3 and patches/exl3-ext once, so both
-# build phases see identical inputs. ext.py verifies the source tree, vendored
-# setup.py and base shared object pins, applies the series only for `patched`, and
-# lays out /src/exllamav3 like the upstream checkout; setup.py then compiles every
-# translation unit with its upstream flags. The smoke import needs no driver:
-# libcuda is dlopened lazily.
+# build phases see identical inputs. ext.py verifies the source tree, the vendored
+# setup.py and the base's recorded shared object, applies the series only for
+# `patched`, and lays out /src/exllamav3 like the upstream checkout; setup.py then
+# compiles every translation unit with its upstream flags. The smoke import needs
+# no driver: libcuda is dlopened lazily.
 FROM ext-toolchain AS ext-rebuilt
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     python -I -B /tmp/elpis/patches/exl3-ext/ext.py prepare rebuilt /src/exllamav3
 WORKDIR /src/exllamav3
-RUN python -I -B -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda" && \
+RUN --network=none \
+    python -I -B -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda" && \
     nvcc --version && g++ --version && \
     python -I -B setup.py build_ext --inplace && \
     python -I -B -c "import sys; sys.path.insert(0, '/src/exllamav3'); import torch, exllamav3_ext" && \
     readelf -p .comment exllamav3_ext.cpython-313-x86_64-linux-gnu.so
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     python -I -B /tmp/elpis/patches/exl3-ext/ext.py compose rebuilt \
       exllamav3_ext.cpython-313-x86_64-linux-gnu.so > exl3-patches.json
 
@@ -109,14 +136,16 @@ FROM scratch AS ext-rebuilt-manifest
 COPY --from=ext-rebuilt /src/exllamav3/exl3-patches.json /
 
 FROM ext-toolchain AS ext-patched
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     python -I -B /tmp/elpis/patches/exl3-ext/ext.py prepare patched /src/exllamav3
 WORKDIR /src/exllamav3
-RUN python -I -B -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda" && \
+RUN --network=none \
+    python -I -B -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda" && \
     nvcc --version && g++ --version && \
     python -I -B setup.py build_ext --inplace && \
-    python -I -B -c "import sys; sys.path.insert(0, '/src/exllamav3'); import torch, exllamav3_ext"
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+    python -I -B -c "import sys; sys.path.insert(0, '/src/exllamav3'); import torch, exllamav3_ext" && \
+    readelf -p .comment exllamav3_ext.cpython-313-x86_64-linux-gnu.so
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     python -I -B /tmp/elpis/patches/exl3-ext/ext.py compose patched \
       exllamav3_ext.cpython-313-x86_64-linux-gnu.so > exl3-patches.json
 
@@ -132,7 +161,7 @@ LABEL io.elpis.exl3.patches-sha256="${EXL3_ENGINE_MANIFEST_SHA256}"
 USER root
 COPY --from=ext-rebuilt /src/exllamav3/exllamav3_ext.cpython-313-x86_64-linux-gnu.so \
   /opt/venv/lib/python3.13/site-packages/
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     /opt/venv/bin/python -I -B /tmp/elpis/patches/exl3-ext/ext.py record rebuilt \
       /opt/qwen/exl3-patches.json && \
     echo "${EXL3_ENGINE_MANIFEST_SHA256}  /opt/qwen/exl3-patches.json" | sha256sum --check --strict && \
@@ -151,7 +180,7 @@ COPY --from=ext-patched /opt/venv/lib/python3.13/site-packages/exllamav3/ \
   /opt/venv/lib/python3.13/site-packages/exllamav3/
 COPY --from=ext-patched /src/exllamav3/exllamav3_ext.cpython-313-x86_64-linux-gnu.so \
   /opt/venv/lib/python3.13/site-packages/
-RUN --mount=type=bind,from=patches,target=/tmp/elpis/patches \
+RUN --network=none --mount=type=bind,from=patches,target=/tmp/elpis/patches \
     /opt/venv/bin/python -I -B /tmp/elpis/patches/exl3-ext/ext.py record patched \
       /opt/qwen/exl3-patches.json && \
     echo "${EXL3_ENGINE_MANIFEST_SHA256}  /opt/qwen/exl3-patches.json" | sha256sum --check --strict && \

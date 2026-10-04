@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "Byte identity only; not capacity, performance or quality qualification.",
-  "base_image_tag": "qwen-elpis:exl3-native-comparison",
-  "base_image_id": "sha256:b35314f48c7684b4c9cf3d59f4c21395316aa1fc0925db782f460005aa2602ff",
+  "base_image_tag": "qwen-elpis:exl3-base",
+  "base_content_manifest": "docker/base/engine-manifest.json",
   "engine_revision": "355c6ee10fbd25b79070316a81ea0708cc18155a",
   "research_revision": "75d4ec5a4829d39d515fc442ee8ee4664246797c",
   "source_revisions": {
@@ -18,7 +18,7 @@
   "provenance_notes": [
     "Weight and metadata SHA256 pins are retained from exl3-native-provenance-1.json and exl3-model-inventory-1.json; runtime rehashes every listed file before loading.",
     "merges.txt extends that inventory: local SHA256 a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d; Git blob a494e019ca1502219fd0128658b979e5f05ae8e8 matches the target revision's Hugging Face tree.",
-    "Native EXL3 DFlash2 engine is inherited from the immutable image; no dflash2-pathway overlay or source patches apply."
+    "Native EXL3 DFlash2 engine is inherited from the source-built base (docker/base/); no dflash2-pathway overlay or source patches apply."
   ],
   "target": {
     "chat_template.jinja": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",

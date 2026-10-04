@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "content_sha256": "5d14b597feae50c6b60c85ae75f6eacac21ca7605101081373b9d8da0b10db65",
+  "listing": "docker/base/manifest.py listing: dpkg packages plus files and symlinks under /opt/uv-python and /opt/venv",
+  "per_build": [
+    "/opt/venv/lib/python3.13/site-packages/exllamav3-1.5.0.dist-info/RECORD",
+    "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so"
+  ]
+}

@@ -16,48 +16,96 @@ target-only, different-KV or alternate-engine fallback.
    storage, fans and power remain operator-owned.
 2. Supply an existing canonical absolute private `QWEN_STATE_ROOT` containing
    `models/qwen38-27b-exl3/`, `models/dflash2-exl3/`, private writable `cache/`,
-   and an operator-owned mode-0600 regular `api-key`. The key is 1..4096 bytes,
-   printable ASCII without whitespace, with at most one trailing newline.
-   Startup neither downloads nor converts models.
+   an operator-owned mode-0700 `prefix-cache/` directory and an operator-owned
+   mode-0600 regular `api-key`. The key is 1..4096 bytes, printable ASCII without
+   whitespace, with at most one trailing newline. Compose creates none of these
+   paths. Startup neither downloads nor converts models.
 3. Create `qwen-inference-launch.lock` only if absent, with exclusive creation
    and mode 0600. Never replace or unlink its inode while any deployment can
    exist. Reuse the existing shared lock when migrating an occupied service.
 4. For rootless Docker, `QWEN_CONTAINER_USER=0:0` maps to the operator. For
    rootful Docker, set the state owner's numeric `UID:GID`; do not weaken state
    permissions to work around an ownership mismatch.
-5. The intended Docker daemon must already contain local tag
-   `qwen-elpis:exl3-native-comparison` with exact image ID
-   `sha256:b35314f48c7684b4c9cf3d59f4c21395316aa1fc0925db782f460005aa2602ff`.
-   Its recorded RepoDigest is not a downloadable registry manifest. A direct
-   digest `FROM` attempted registry resolution and failed; there is no registry
-   pull or substitute-image fallback.
+5. Build the base image from source. Network access is used only in step 5a.
+   a. `bash docker/fetch-base.sh` pulls the three pinned images by digest
+      (CUDA 13.0.0 devel and runtime, uv 0.9.15) and downloads every file that
+      `docker/base/sources.lock` names into `build/base-inputs/`: the exllamav3
+      commit tarball (355c6ee), the CPython 3.13.10 build that uv installs, the
+      Ubuntu `.deb` files from a fixed snapshot.ubuntu.com time, the base wheels
+      (torch and CUDA wheels from download.pytorch.org/whl/cu130, all other wheels
+      from PyPI) and the serve wheels. Each file must match its sha256, else the
+      script stops.
+   b. `bash docker/build-base.sh` builds `docker/base/Dockerfile` with no network
+      in any RUN, `SOURCE_DATE_EPOCH` from the checked-out commit,
+      `rewrite-timestamp=true` and no attestations. It tags `qwen-elpis:exl3-base`
+      only if the image's content manifest equals the pin in
+      `docker/base/engine-manifest.json`.
+
+   The content manifest (`docker/base/manifest.py`) is the sha256 of a sorted
+   listing: the installed Debian packages with versions, and the sha256, mode
+   and path of every file and symlink under `/opt/uv-python` and `/opt/venv`
+   (without `__pycache__`). nvcc does not give byte-identical output from build
+   to build: nvcc puts its process ID into local symbol names, and cicc orders
+   registers by memory layout (ASLR), which changes the PTX of some
+   `gdn_conv_rule_norm_kernel` instances. ptxas also writes source mtimes into
+   the `-lineinfo` tables; `patches/exl3-ext/ext.py` sets fixed mtimes. A fixed
+   layout needs ASLR off, and Docker's default seccomp profile blocks that in
+   RUN steps. So the compiled `exllamav3_ext` shared object and the exllamav3
+   `RECORD` (which holds its hash) are not part of the pin. The base build
+   records their sha256 in `/opt/elpis-base-manifest.json`, and
+   `patches/exl3-ext/ext.py` requires the installed shared object to match that
+   record. To check a base by hand, run `manifest.py check` in it:
 
 ```sh
+docker run --rm --network none --user 0:0 \
+  --mount type=bind,source="$PWD/docker/base/manifest.py",target=/tmp/manifest.py,readonly \
+  --entrypoint /opt/venv/bin/python qwen-elpis:exl3-base \
+  -I -B /tmp/manifest.py check /opt/elpis-base-manifest.json
+```
+
+   `docker/base/lock.py` wrote `requirements.lock` and `sources.lock` from
+   `requirements.in`, `apt.in` and `serve/exl3-requirements.txt`. It needs network
+   access and is not part of a build. Run it only to change an input.
+
+```sh
+bash docker/fetch-base.sh       # the only step with network access
+bash docker/build-base.sh       # tags qwen-elpis:exl3-base
 # CPU image build, not a GPU launch:
-bash docker/build-exl3.sh baseline qwen-inference:exl3   # or: candidate
+bash docker/build-exl3.sh candidate-ext qwen-inference:exl3   # or: baseline, candidate, candidate-rebuilt
 export QWEN_STATE_ROOT=/absolute/private/qwen-state
 export QWEN_IMAGE=qwen-inference:exl3
 docker compose --project-name qwen-inference config --quiet
 ```
 
-Use the build script, not `docker compose build` or a direct Dockerfile build.
-It authenticates the local base's actual image ID before and after a
-`--pull=false` build using the daemon-backed default builder, verifies the baked
-base-ID label and only then assigns the output tag. It refuses an output tag
-already pointing to the native base. The operator must exclusively control image
-tags during the build: these checks detect ordinary retagging, not a hostile
-Docker operator. Compose has no build stanza and uses `pull_policy: never`.
+Use the build scripts, not `docker compose build` or a direct Dockerfile build.
+`build-exl3.sh` first builds the `base-manifest` target: `manifest.py check` runs
+in the base and its content sha256 must equal the pin. The value becomes the
+`io.elpis.exl3.base-manifest-sha256` label of the image. The script also requires
+the base tag to name the same image before and after the `--pull=false` build with
+the daemon-backed default builder, checks the baked labels and only then assigns
+the output tag. It refuses an output tag that names the base. The operator must
+exclusively control image tags during the build: the before/after check detects
+ordinary retagging, not a hostile Docker operator. Compose has no build stanza and
+uses `pull_policy: never`.
 
 The `baseline` target retains the base's installed native EXL3/DFlash2 engine
 unchanged. The `candidate` target additionally applies the SHA-pinned
 `patches/exl3` series to the installed ExLlamaV3 and embeds the Bend acceptance
-artifact (recorded by `/opt/qwen/exl3-patches.json` and image labels). Both
-bake the standalone `serve/exl3_server.py`, startup guard, healthcheck and
-model inventory, rather than mounting server code from `/tmp`. Build-time network
-access installs the hash-pinned JSON Schema wheels from
-`serve/exl3-requirements.txt`; serving uses offline Hugging Face/Transformers
-settings and disables telemetry. EXL3, torch and transformers are not rebuilt or
-replaced by that dependency install.
+artifacts (recorded by `/opt/qwen/exl3-patches.json` and image labels). The
+`candidate-ext` target is `candidate` plus `exllamav3_ext` recompiled for sm_86
+from the pinned `355c6ee` sources with the SHA-pinned `patches/exl3-ext` series;
+`candidate-rebuilt` recompiles the same sources unpatched, as the toolchain
+control. Both extension targets build in two phases: the first exports the
+composed engine manifest, whose SHA-256 becomes the final image's
+`io.elpis.exl3.patches-sha256` label. All targets bake the standalone
+`serve/exl3_server.py`, startup guard, healthcheck and model inventory, rather
+than mounting server code from `/tmp`. No RUN step has network access: the
+hash-pinned JSON Schema wheels of `serve/exl3-requirements.txt` come from
+`build/base-inputs/serve-wheels/`. The extension stages use the devel image of the
+base build stage with its own g++, not an apt install. Serving uses offline
+Hugging Face/Transformers settings and disables telemetry. Torch and
+transformers are never rebuilt or replaced; only the extension targets replace
+the installed `exllamav3_ext` shared object.
 
 `prepare/exl3-manifest.json` records engine/model revisions and SHA256 identities.
 Every start authenticates all 13 target and three draft runtime files, including
@@ -68,8 +116,8 @@ the inventory. Model-byte identity is not a numerical or quality qualification.
 
 ## Ordinary Compose ownership and lifecycle
 
-Do not execute a new launch beside the existing live service. After explicit
-exclusive-GPU approval and an authorized cutover:
+Do not launch beside another inference service on the same GPU or port. After
+explicit exclusive-GPU approval:
 
 ```sh
 export QWEN_ALLOW_UNQUALIFIED=1
@@ -93,6 +141,15 @@ credential and root filesystem, private writable cache, restricted tmpfs,
 and library caches into `/cache` and uses CDI's `/usr/local/nvidia/lib64` driver
 path. The served model is `qwen3.8-27b` at `http://127.0.0.1:18020/v1`.
 
+Compose always binds `prefix-cache/` at `/prefix-cache`, so the launcher always
+passes `--prefix-cache`. The persistent prefix cache is bound to the image ID:
+`QWEN_IMAGE_ID` must be the full ID `sha256:<64 hex>` of `QWEN_IMAGE`
+(`docker image inspect -f '{{.Id}}' "$QWEN_IMAGE"`); without it, or with a bare hex
+value, persistence stays off. Its engine module (`exllamav3.generator.persist`,
+patch 9501b) exists only in the `candidate-ext` image: `baseline`, `candidate` and
+`candidate-rebuilt` fail at startup with `ModuleNotFoundError` unless
+`QWEN_PREFIX_PERSIST=0`.
+
 The healthcheck authenticates `/health` and the expected `/v1/models` entry. It
 runs every 30 seconds, with a 310-second probe budget, 315-second Docker timeout,
 20-minute startup grace and three failures to unhealthy. Docker does not restart
@@ -115,7 +172,21 @@ execute their functions. Supported selection is `auto`, `none`, `required` or a
 named function, with `parallel_tool_calls` enforced on the result. JSON Schema
 validation is offline. `strict: true` is a fail-closed schema postcondition, not
 constrained generation: invalid model arguments or violated tool selection fail
-rather than being repaired or reported as successful calls.
+rather than being repaired or reported as successful calls. Tool `parameters` must be
+a direct `type: object` with parameter schemas in its root `properties`,
+`patternProperties` or `additionalProperties`. Root `allOf`, `anyOf`, `oneOf`, `not`,
+`if`/`then`/`else` and `dependentSchemas` are accepted only when they constrain the
+object (for example `required`) and declare no parameter schemas; a root `$ref` is
+rejected.
+
+The server matches tool-schema `pattern` and `patternProperties` with the `regex`
+module from the base image, not Python `re`. All matches for one response share a
+2-second budget. When the budget runs out, the request fails with HTTP 400
+`pattern_timeout`. A tool schema that contains both `unevaluatedProperties` and
+`patternProperties` is rejected. A client must send its request line and headers
+within 60 seconds (this includes keep-alive idle time) and its body within 300
+seconds; else the server closes the connection (HTTP 408 for a late body).
+Generation and response writes have no timeout.
 
 Chat `stream=true` is **buffered SSE**, marked
 `X-EXL3-Transport: buffered-sse`: generation finishes before content/reasoning/tool
@@ -130,24 +201,34 @@ reasoning and final content remain separate channels.
 
 ## Current persistent live deployment
 
-The current authenticated promotion is `qwen-exl3-serving-9`, container
-`b930391224e8806e925fdd128c34446c52673959ae3451388870b249d48b121a`, with image
-`sha256:91b01c532280424832d2501e72ebe743ac3fb9aea4ee070e73e81a41c6262d19` (p3021r,
-variant `candidate-ext`: the #73 stack of `docs/benchmarks.md` §8, tree3s plus the
+The current authenticated promotion is `qwen-exl3-serving-10`, container
+`7b98d3dc23193b4e5c7561d4418cadbe83f824e4d233724dfcbff3d63f61b07b`, with image
+`sha256:bc21628f38e13fba42084318e413a61f998f331015d3ca40c99bdb216ae4021c`
+(`qwen-inference:exl3-cand-p3021r-autolith`). It is a server-only hotfix of p3021r: the
+p3021r image layers unchanged, plus one layer that replaces
+`/opt/qwen/serve/exl3_server.py` (sha256 `a10b3137…25b7`) = the c10606d server + 111e727
+(Python-cased tool literals) + 5f39088 (root composition, required by Autolith 0.57.0).
+Engine, labels and `exl3-patches.json` are the p3021r ones. The repository HEAD server
+is not used here because it needs the pfast prefix-persist engine.
+p3021r is `sha256:91b01c532280424832d2501e72ebe743ac3fb9aea4ee070e73e81a41c6262d19`
+(variant `candidate-ext`: the #73 stack of `docs/benchmarks.md` §8, tree3s plus the
 prefill patches 3020, 5111, 5112 and 3021c, which computes prefill Q·Kᵀ in int8,
 rebuilt from commit 14a15c6 after the eta → elpis rename; #74 reproduced #73's 9 rows
-byte for byte). The canonical tag `qwen-inference:exl3` identifies this image and
-`qwen-inference:exl3-previous` the retained previous image
-`sha256:d48879d13f477d6d039210f8b078a3bc1beda344350755c76bad626029f16de3` (p3021p, the
-same stack before the rename).
+byte for byte). The canonical tag `qwen-inference:exl3` identifies the serving-10 image
+and `qwen-inference:exl3-previous` the retained p3021r image.
 The persistent configuration is
-`/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-9/compose.json` (Compose project
-`elpis-exl3-serving-9`, network `elpis_default`), alongside unchanged copies of
+`/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-10/compose.json` (Compose project
+`elpis-exl3-serving-10`, network `elpis_default`), alongside unchanged copies of
 `launch-gate.py`, `recovery.py` and `operate.py` and its promoted `cutover-window-1/`.
 It sequentially reuses `/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-1/cache`; preserve
 the old state. Promotions are made by `/tmp/elpis-promote.sh TAG IMAGE` (operator
 tooling outside the repo), which replays the serving-2 guardian procedure below with
-automatic guardian rollback. The previous `qwen-exl3-serving-8` (container
+automatic guardian rollback. serving-10 used its copy `/tmp/elpis-promote-hotfix.sh`,
+which pins the adapter to the hotfix file instead of repository HEAD, verifies the mise
+Hermes CLI through its stream-json events, and replays a captured Autolith request.
+The previous `qwen-exl3-serving-9` (container
+`b930391224e8806e925fdd128c34446c52673959ae3451388870b249d48b121a`, image p3021r,
+Compose project `elpis-exl3-serving-9`), `qwen-exl3-serving-8` (container
 `bf7087ac57f2dad0113149301e7d7e55b0a05e6a78e0b82cd00cd42269a57ab5`, image p3021p,
 Compose project `eta-exl3-serving-8`), `qwen-exl3-serving-7` (container
 `ebb819cf17a5754f6b9f37c8188d31f73b7e1503597c7eec7ee03d6bfa1611ee`, image p3020fh),
@@ -183,13 +264,17 @@ replace the gate with a direct launch, or start a competing root Compose/Nix
 service. Future maintenance must use the retained deployment and its approved
 ownership procedure. Restart configuration is not a demonstrated cold-boot test.
 
-Current private evidence is in `exl3-serving-9/evidence/` under the state root:
+Current private evidence is in `exl3-serving-10/evidence/` under the state root:
 `main-verification.json`, `promotion-receipt.json`, `cutover-receipt.json`,
 `endpoint-smoke.json`, `live-tool-smoke.json`, `hermes-real-tool-turns.json`,
-`omp-smoke.jsonl`, `installed-exl3-server.py`, `guardian.log` and `thermal.csv`. The
-guardian exited 0 with state `promoted_authenticated_main_verified`. Real Hermes
-gateway 0.21.3 and interactive 0.21.4 terminal-tool turns and an OMP 18.4.2 read-tool
-round trip passed against the new image; no Telegram delivery was repeated.
+`hermes-interactive-stream.jsonl`, `omp-smoke.jsonl`, `autolith-request.json`,
+`autolith-replay.json`, `installed-exl3-server.py`, `guardian.log` and `thermal.csv`.
+The guardian exited 0 with state `promoted_authenticated_main_verified`. Real Hermes
+gateway and interactive (2026.9.24) terminal-tool turns, an OMP 18.4.12 read-tool round
+trip and the captured Autolith 0.57.0 request (55 tools; HTTP 400 on serving-9) passed
+against the new image. After promotion, an interactive Autolith 0.57.0 turn called
+`search.content` (the root-`oneOf` tool) and answered from its result. No Telegram
+delivery was repeated.
 
 serving-2's evidence (`exl3-serving-2/evidence/`: `main-verification.json`,
 `promotion-receipt.json`, `telegram-delivery.json`) records the top-level reasoning

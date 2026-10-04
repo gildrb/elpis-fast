@@ -27,15 +27,21 @@ See [development](../docs/development.md) and [Docker setup](../docs/docker.md).
 
 ## Foreground adapter
 
-Provision the existing private state, EXL3 target/draft, key and persistent lock
-as in the Docker guide. Build and review the image first in the intended daemon
-using `bash docker/build-exl3.sh baseline qwen-inference:exl3` (or `candidate`). That script authenticates
-the required local native base image ID; Compose has no build stanza. Nix never
-implicitly builds or pulls the image.
+Provision the existing private state, EXL3 target/draft, key, persistent lock
+and operator-owned mode-0700 `prefix-cache/` as in the Docker guide; every bind
+source must already exist. Build and review the image first in the intended daemon:
+`bash docker/fetch-base.sh` (the only step with network access), then
+`bash docker/build-base.sh`, then
+`bash docker/build-exl3.sh candidate-ext qwen-inference:exl3` (or `baseline`,
+`candidate`). The scripts build the base from source and authenticate it by its
+pinned content manifest (`docker/base/engine-manifest.json`); Compose has no
+build stanza. Nix never implicitly builds or pulls the image.
 
 ```sh
 export QWEN_IMAGE=qwen-inference:exl3
 export QWEN_ALLOW_UNQUALIFIED=1
+# The prefix cache persists only when bound to the image's full ID.
+export QWEN_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$QWEN_IMAGE")"
 # GPU launch: execute only after exclusive-access approval.
 nix run .#serve -- --state-root /absolute/private/qwen-state
 ```
@@ -70,6 +76,9 @@ a bootable host and does not configure storage or GPU drivers.
 ```
 
 `port` remains a host-loopback mapping option. `model` remains read-only.
+For a persistent prefix cache, set
+`systemd.user.services.qwen-inference.environment.QWEN_IMAGE_ID` to the image's
+full `sha256:` ID; without it the server runs with persistence disabled.
 The rootless user service consumes `unix://%t/docker.sock`, runs Compose
 `up --detach --no-build --pull never --wait --wait-timeout 1200`, and delegates
 stop to Compose. Docker owns process restart. Systemd `active (exited)` means
@@ -82,13 +91,10 @@ Old automatic directory/key creation, source-overlay preparation, GPU polling,
 custom Python health supervision and cleanup/retry loops are removed. Provision
 state explicitly; missing bind sources fail closed. The container's persistent
 state lock remains. Its protection does not extend to another state or daemon.
-Do not activate this adapter over an occupied endpoint. The current live
-`qwen-exl3-serving-2` deployment uses its persistent guardian configuration at
-`/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-2/compose.json`, not this ordinary
-Nix launcher. Its guardian gate owns the same launch-lock inode and passes the
-lock to the baked EXL3 model launcher. Preserve its promoted window and controls;
-do not bypass the gate or launch this adapter beside it. See
-[current deployment and evidence](../docs/docker.md#current-persistent-live-deployment).
+Do not activate this adapter over an occupied endpoint, or beside another
+service that holds the same launch lock or GPU. The live elpis-fast service uses
+its guardian configuration, not this adapter. See
+[current deployment](../docs/docker.md#current-persistent-live-deployment).
 
 Static Nix validation is not activation, cold-boot, hang-recovery,
 suspend/resume, full-context capacity or model-quality proof. The actual EXL3

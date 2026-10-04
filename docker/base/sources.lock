@@ -1,0 +1,930 @@
+{
+  "schema": 1,
+  "images": {
+    "devel": "nvidia/cuda:13.0.0-devel-ubuntu24.04@sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d",
+    "runtime": "nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:95318efecfd68ab3d109da5277863257b06137c84f34a87f38de970d5cd035d3",
+    "uv": "ghcr.io/astral-sh/uv:0.9.15@sha256:4c1ad814fe658851f50ff95ecd6948673fffddb0d7994bdb019dcb58227abd52"
+  },
+  "archives": {
+    "exllamav3": {
+      "url": "https://codeload.github.com/r0b0tlab/exllamav3/tar.gz/355c6ee10fbd25b79070316a81ea0708cc18155a",
+      "sha256": "0e5039f4ded16002c76ee4db22f0754f229ae2204e796c7334b03e597626d423",
+      "file": "exllamav3-355c6ee.tar.gz"
+    },
+    "cpython": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251202/cpython-3.13.10%2B20251202-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "ecf304c757c9de6aef849ca451ec08a72f6827c0fc8819d39fd341f29d00ccd6",
+      "file": "python/20251202/cpython-3.13.10+20251202-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    }
+  },
+  "apt": {
+    "snapshot": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/",
+    "packages": [
+      {
+        "package": "binutils-common",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/binutils-common_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/binutils-common_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "d136073f5e2153f3df11c1d08d66727b9466b28ff483f50085f14bbe3464b5ee"
+      },
+      {
+        "package": "binutils-x86-64-linux-gnu",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/binutils-x86-64-linux-gnu_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/binutils-x86-64-linux-gnu_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "1e510a15f30208d39edcd840e48f26a77bbca7c417805eeccb1e3f7de198ef29"
+      },
+      {
+        "package": "binutils",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/binutils_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/binutils_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "b3b5a84181a38fd191820b2cdcc1a3eeb1cd6333ad472f2092f96e81047e9c74"
+      },
+      {
+        "package": "ca-certificates",
+        "version": "20260601~24.04.1",
+        "file": "debs/ca-certificates_20260601~24.04.1_all.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/c/ca-certificates/ca-certificates_20260601~24.04.1_all.deb",
+        "sha256": "6bac2a01979e210d9eac1d4d56747ec709ea60654744d66705dc3c36e7629e50"
+      },
+      {
+        "package": "cpp-13-x86-64-linux-gnu",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/cpp-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/cpp-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "2ca48bf0c2d6465bc39322899715a85d934b4d7442dd5586a7bebbe3ce0f806b"
+      },
+      {
+        "package": "cpp-13",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/cpp-13_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/cpp-13_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "c7535331fbb183c802c3bf4b6b210872dcc12d0421b3212b3c4b940f2c59ed3a"
+      },
+      {
+        "package": "cpp-x86-64-linux-gnu",
+        "version": "4:13.2.0-7ubuntu1",
+        "file": "debs/cpp-x86-64-linux-gnu_13.2.0-7ubuntu1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-defaults/cpp-x86-64-linux-gnu_13.2.0-7ubuntu1_amd64.deb",
+        "sha256": "85059b30960de3582e8612740614da3dfe47241d0368a28dea686188cf7648dd"
+      },
+      {
+        "package": "cpp",
+        "version": "4:13.2.0-7ubuntu1",
+        "file": "debs/cpp_13.2.0-7ubuntu1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-defaults/cpp_13.2.0-7ubuntu1_amd64.deb",
+        "sha256": "b51f8094760f7b41afdcb1fe1b5a57fc64b75a090859918af17450a10f8c7d31"
+      },
+      {
+        "package": "gcc-13-base",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/gcc-13-base_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/gcc-13-base_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "e859aca26585bb91113a451f1e66bc0e5283cb08797d679aacc1d936ae6dff8e"
+      },
+      {
+        "package": "gcc-13-x86-64-linux-gnu",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/gcc-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/gcc-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "a134b0319a82d14581b3a14820d2832af4ec9778ed8b9b4ddaeecfb0555ec325"
+      },
+      {
+        "package": "gcc-13",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/gcc-13_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/gcc-13_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "7438ff160b020a74970672189ecae25d0ca650de6d7f543f12a3134192cffbd9"
+      },
+      {
+        "package": "gcc-14-base",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/gcc-14-base_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/gcc-14-base_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "b95c172411a7fdae70307cf33a9f5320ba5e056b556454543dd5b679d5ce1c4f"
+      },
+      {
+        "package": "gcc-x86-64-linux-gnu",
+        "version": "4:13.2.0-7ubuntu1",
+        "file": "debs/gcc-x86-64-linux-gnu_13.2.0-7ubuntu1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-defaults/gcc-x86-64-linux-gnu_13.2.0-7ubuntu1_amd64.deb",
+        "sha256": "72e79089a10e381360bfc6f03c5e5d8c2ff177d6dbac2cd7ffb3cc1383f57591"
+      },
+      {
+        "package": "gcc",
+        "version": "4:13.2.0-7ubuntu1",
+        "file": "debs/gcc_13.2.0-7ubuntu1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-defaults/gcc_13.2.0-7ubuntu1_amd64.deb",
+        "sha256": "0e0bb8b25153ed1c44ab92bc219eed469fcb5820c5c0bc6454b2fd366a33d3ee"
+      },
+      {
+        "package": "libasan8",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libasan8_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libasan8_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "8321aac6230fa1da320e76eb6288b7436164624aec449ed3933ea6c4cc86daac"
+      },
+      {
+        "package": "libatomic1",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "fe49cbbc7be753528380c724a8eef5f1e31dffa9221f692c5069048d81c7449d"
+      },
+      {
+        "package": "libbinutils",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/libbinutils_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/libbinutils_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "064dce00ce94e1fc2d33779cb0071088f4c8aac79e85345f2e78a020f7d14699"
+      },
+      {
+        "package": "libc-bin",
+        "version": "2.39-0ubuntu8.9",
+        "file": "debs/libc-bin_2.39-0ubuntu8.9_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/glibc/libc-bin_2.39-0ubuntu8.9_amd64.deb",
+        "sha256": "066398a06ef1a218d4109461d4c636eafe83322ad19b179de9ef7af42b3fec58"
+      },
+      {
+        "package": "libc-dev-bin",
+        "version": "2.39-0ubuntu8.9",
+        "file": "debs/libc-dev-bin_2.39-0ubuntu8.9_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/glibc/libc-dev-bin_2.39-0ubuntu8.9_amd64.deb",
+        "sha256": "77db23aba4582d034d9a95e4818a16e7e51a2d4fb17a9204439688e288d67f4c"
+      },
+      {
+        "package": "libc6-dev",
+        "version": "2.39-0ubuntu8.9",
+        "file": "debs/libc6-dev_2.39-0ubuntu8.9_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/glibc/libc6-dev_2.39-0ubuntu8.9_amd64.deb",
+        "sha256": "e13d5fcc1b2a86f75bca8e0026a8e39f24fe97ca86e92be79991f8697eb1306f"
+      },
+      {
+        "package": "libc6",
+        "version": "2.39-0ubuntu8.9",
+        "file": "debs/libc6_2.39-0ubuntu8.9_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/glibc/libc6_2.39-0ubuntu8.9_amd64.deb",
+        "sha256": "ff5557d99b51f761c4b7c92368b9cc45565eda17df9bf9eb4b134d09825008be"
+      },
+      {
+        "package": "libcc1-0",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libcc1-0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libcc1-0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "454456436ca767817a860557263d7cc2489f0a410f03efff4c0bb236d579ec09"
+      },
+      {
+        "package": "libcrypt-dev",
+        "version": "1:4.4.36-4build1",
+        "file": "debs/libcrypt-dev_4.4.36-4build1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/libx/libxcrypt/libcrypt-dev_4.4.36-4build1_amd64.deb",
+        "sha256": "2edff420ef80b4a3f3751e65c33423ef30e563122a58b759e4854ea8d84ba1b1"
+      },
+      {
+        "package": "libctf-nobfd0",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/libctf-nobfd0_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/libctf-nobfd0_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "da352eb7fa6c4369d2a6c1e5e680f574eda2e38576563326b18d9e47e61c4078"
+      },
+      {
+        "package": "libctf0",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/libctf0_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/libctf0_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "7ec86d697c3668503c85f308a6832f092075b5880ad002f22185264da0bd4645"
+      },
+      {
+        "package": "libgcc-13-dev",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "file": "debs/libgcc-13-dev_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-13/libgcc-13-dev_13.3.0-6ubuntu2~24.04.1_amd64.deb",
+        "sha256": "cd689db2691edaa10f37329307292796bb599e722e0505c79e14caaa1fe9a93a"
+      },
+      {
+        "package": "libgcc-s1",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libgcc-s1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libgcc-s1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "aa7fadbe33b78bcf99885318040601c550c208929565b179891d9a3cc2aa68cd"
+      },
+      {
+        "package": "libgomp1",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libgomp1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libgomp1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "e8a95ec58125b4933597f30ff56c2ae10edf90f287262e366d4b6edea3019144"
+      },
+      {
+        "package": "libgprofng0",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/libgprofng0_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/libgprofng0_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "1b7e3c2fc162e8358ca6e5a3fffdb4d0d632f790630323215841bb36a63c0ab8"
+      },
+      {
+        "package": "libhwasan0",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libhwasan0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libhwasan0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "2195318cfe68fe16b601913ef7b33c9a900372f57861643fdc9ae6fef84534cd"
+      },
+      {
+        "package": "libisl23",
+        "version": "0.26-3build1.1",
+        "file": "debs/libisl23_0.26-3build1.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/i/isl/libisl23_0.26-3build1.1_amd64.deb",
+        "sha256": "4e040926e50fb961fae9bf95660189d468336a4a17bc321872c434fc8f777e7f"
+      },
+      {
+        "package": "libitm1",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libitm1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libitm1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "1fca498129dd3510294809d77ee754f72a9de281111200e9b7b9a5adf37faa9f"
+      },
+      {
+        "package": "libjansson4",
+        "version": "2.14-2build2",
+        "file": "debs/libjansson4_2.14-2build2_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/j/jansson/libjansson4_2.14-2build2_amd64.deb",
+        "sha256": "0cf79113f5d193ce9af2be2ff4b2c3b30dd4e55a0b6c47f7d28f6c849ff3aa60"
+      },
+      {
+        "package": "liblsan0",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/liblsan0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/liblsan0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "dc0c2a1a053e833ba4d71e1ec2ba4244fe301761ad4a91d6725f927a52d86a14"
+      },
+      {
+        "package": "libmpc3",
+        "version": "1.3.1-1build1.1",
+        "file": "debs/libmpc3_1.3.1-1build1.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/m/mpclib3/libmpc3_1.3.1-1build1.1_amd64.deb",
+        "sha256": "cebe6098bb3d66fdacac9dc6fe406a651216d9c00f27c3f9c159d15d96cdf864"
+      },
+      {
+        "package": "libmpfr6",
+        "version": "4.2.1-1build1.1",
+        "file": "debs/libmpfr6_4.2.1-1build1.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/m/mpfr4/libmpfr6_4.2.1-1build1.1_amd64.deb",
+        "sha256": "aebc1c8b69a1f98bb43dfc268daecd181116dbf40b13ee4e822eb4bdd52b493a"
+      },
+      {
+        "package": "libquadmath0",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libquadmath0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libquadmath0_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "dc8f0ca542e09d662f29370c8393c016440dd4bc5c996c5fcc19f632b63ce3b0"
+      },
+      {
+        "package": "libsframe1",
+        "version": "2.42-4ubuntu2.10",
+        "file": "debs/libsframe1_2.42-4ubuntu2.10_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb",
+        "sha256": "72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564"
+      },
+      {
+        "package": "libstdc++6",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libstdc++6_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libstdc++6_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "a51f8de7829211db961a31f02158058ad1a95f92ac6d0a5dff6350e2821c54c0"
+      },
+      {
+        "package": "libtsan2",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libtsan2_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libtsan2_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "8cbcc9b3ae5ef23b449383d47a9035b27596e307d7dce7df9b83d47a7acd1d91"
+      },
+      {
+        "package": "libubsan1",
+        "version": "14.2.0-4ubuntu2~24.04.1",
+        "file": "debs/libubsan1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/g/gcc-14/libubsan1_14.2.0-4ubuntu2~24.04.1_amd64.deb",
+        "sha256": "a16dea3abe2dcac99bcfae27e7e5672fde64573c3c170dcb0cd55631238f9814"
+      },
+      {
+        "package": "linux-libc-dev",
+        "version": "6.8.0-142.142",
+        "file": "debs/linux-libc-dev_6.8.0-142.142_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/l/linux/linux-libc-dev_6.8.0-142.142_amd64.deb",
+        "sha256": "937db1a88a4fa2ea97fd4eab89f2cd9d077290f6a26bcd27b1a6d24fa3d706b6"
+      },
+      {
+        "package": "rpcsvc-proto",
+        "version": "1.4.2-0ubuntu7",
+        "file": "debs/rpcsvc-proto_1.4.2-0ubuntu7_amd64.deb",
+        "url": "https://snapshot.ubuntu.com/ubuntu/20260923T120000Z/pool/main/r/rpcsvc-proto/rpcsvc-proto_1.4.2-0ubuntu7_amd64.deb",
+        "sha256": "7eb710fe148d224c159ddec1ceb0ba53ead52a80a6793dcdae1474acf20d8f71"
+      }
+    ]
+  },
+  "wheels": [
+    {
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "index": "pypi",
+      "file": "wheels/annotated_doc-0.0.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl",
+      "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "index": "pypi",
+      "file": "wheels/annotated_types-0.8.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "index": "pypi",
+      "file": "wheels/anyio-4.15.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101"
+    },
+    {
+      "name": "blessed",
+      "version": "1.50.0",
+      "index": "pypi",
+      "file": "wheels/blessed-1.50.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/93/79/dbf3888fa9ee5566f0acf5b87e5eeeae854b4ff8d819a564a1e73d1b5b82/blessed-1.50.0-py3-none-any.whl",
+      "sha256": "6a693d524f7c21129dd61c4d10f11bda89911c05dc7df91219854c9ccf394cbf"
+    },
+    {
+      "name": "certifi",
+      "version": "2026.7.22",
+      "index": "pypi",
+      "file": "wheels/certifi-2026.7.22-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.1",
+      "index": "pypi",
+      "file": "wheels/charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/fb/af/63240b0c0248c075c2535a1f1bd992821d8251b9f173abc13329661d09e4/charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "62b55f6722735a6c472f88361cde6640608773d9443cebdbb51abf436a1fcdd3"
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "index": "pypi",
+      "file": "wheels/click-8.5.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
+      "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360"
+    },
+    {
+      "name": "cuda-bindings",
+      "version": "13.0.3",
+      "index": "cu130",
+      "file": "wheels/cuda_bindings-13.0.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/ab/ac/699889100536f1b63779646291e74eefa818087a0974eb271314d850f5dc/cuda_bindings-13.0.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "512d0d803a5e47a8a42d5a34ce0932802bf72fe952fdb11ac798715a35c6e5cb"
+    },
+    {
+      "name": "cuda-pathfinder",
+      "version": "1.6.0",
+      "index": "cu130",
+      "file": "wheels/cuda_pathfinder-1.6.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/fc/b4/d088047afe39827556df21118cac9ffd20cc3f968c99a7681494d1eb333c/cuda_pathfinder-1.6.0-py3-none-any.whl",
+      "sha256": "1503af579d8379c24bdd65528379bc57039b0455be9f5f9686cf8e473a1fce51"
+    },
+    {
+      "name": "filelock",
+      "version": "3.32.3",
+      "index": "cu130",
+      "file": "wheels/filelock-3.32.3-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a7/8e/50f46a9c0ce8d2861a394c1347caae037ea0431d2f67d7feb151cbc4649a/filelock-3.32.3-py3-none-any.whl",
+      "sha256": "7f0ca4bcc0e181c60dbbd8aa9ab5b120ebb99e4e064e83636340056f833a1f09"
+    },
+    {
+      "name": "fsspec",
+      "version": "2026.7.0",
+      "index": "cu130",
+      "file": "wheels/fsspec-2026.7.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/fd/3c/6a2bf344106328fd04963664a60b9bb6496fc25df8e962fcdc1367285fb9/fsspec-2026.7.0-py3-none-any.whl",
+      "sha256": "b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279"
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "index": "pypi",
+      "file": "wheels/h11-0.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+    },
+    {
+      "name": "hf-transfer",
+      "version": "0.1.9",
+      "index": "pypi",
+      "file": "wheels/hf_transfer-0.1.9-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/d6/d8/f87ea6f42456254b48915970ed98e993110521e9263472840174d32c880d/hf_transfer-0.1.9-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "cdca9bfb89e6f8f281890cc61a8aff2d3cecaff7e1a4d275574d96ca70098557"
+    },
+    {
+      "name": "hf-xet",
+      "version": "1.6.0",
+      "index": "pypi",
+      "file": "wheels/hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/67/4e/a28359bf1c1ecf11eba22123168c138698f7cb576ac678f5a2e16cd5da08/hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "d62671bb130879cef0ee4c9ebe47a14af6c66ec53e6d84dc15936e5ffdfac82f"
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "index": "pypi",
+      "file": "wheels/httpcore-1.0.9-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl",
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "index": "pypi",
+      "file": "wheels/httpx-0.28.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl",
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+    },
+    {
+      "name": "huggingface-hub",
+      "version": "1.32.0",
+      "index": "pypi",
+      "file": "wheels/huggingface_hub-1.32.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/1b/cf/d98dd561d6d0d7b7d7a64d1563f8aaaa7c235daee41c1c9bcc3da62420ed/huggingface_hub-1.32.0-py3-none-any.whl",
+      "sha256": "b0c7c80561969d9cdacdd55fce67ba9584cca0b9d4ea80957a3a5c1445fac5c8"
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "index": "pypi",
+      "file": "wheels/idna-3.20-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c"
+    },
+    {
+      "name": "jinja2",
+      "version": "3.1.6",
+      "index": "cu130",
+      "file": "wheels/jinja2-3.1.6-py3-none-any.whl",
+      "url": "https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl",
+      "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"
+    },
+    {
+      "name": "jinxed",
+      "version": "2.1.0",
+      "index": "pypi",
+      "file": "wheels/jinxed-2.1.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/f1/1d/0a6be99b69bb448448403a45a241aff0dca751832ae54f027ed940d2eb52/jinxed-2.1.0-py2.py3-none-any.whl",
+      "sha256": "43b802d18b70e405d410fb66eb2837d1101e7e5ea922e666507bb43f34d11d09"
+    },
+    {
+      "name": "llguidance",
+      "version": "1.8.0",
+      "index": "pypi",
+      "file": "wheels/llguidance-1.8.0-cp39-abi3-manylinux_2_31_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/d1/97/208f22f995c64fd3232db41d0004aece45fecaf267b97cf5dd5943ef967e/llguidance-1.8.0-cp39-abi3-manylinux_2_31_x86_64.whl",
+      "sha256": "39668c11396896e5f05f59b70c81e4afd060b3408f02c8518b7a6943bfbb8a5d"
+    },
+    {
+      "name": "marisa-trie",
+      "version": "1.4.1",
+      "index": "pypi",
+      "file": "wheels/marisa_trie-1.4.1-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/1b/dc/cbb5e8416ff5d193847b0e838b0b525773af7b6f4e1e4a33728d1b097fcb/marisa_trie-1.4.1-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "eaa3db575cb757f98d2754bcab5e1e0b2a884dc611964ac2659be13b58ef32e8"
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "index": "pypi",
+      "file": "wheels/markdown_it_py-4.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl",
+      "sha256": "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+    },
+    {
+      "name": "markupsafe",
+      "version": "3.0.3",
+      "index": "cu130",
+      "file": "wheels/markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://download.pytorch.org/whl/markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "ccfcd093f13f0f0b7fdd0f198b90053bf7b2f02a3927a30e63f3ccc9df56b676"
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2",
+      "index": "pypi",
+      "file": "wheels/mdurl-0.1.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl",
+      "sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+    },
+    {
+      "name": "mpmath",
+      "version": "1.3.0",
+      "index": "cu130",
+      "file": "wheels/mpmath-1.3.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+    },
+    {
+      "name": "networkx",
+      "version": "3.6.1",
+      "index": "cu130",
+      "file": "wheels/networkx-3.6.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
+      "sha256": "d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762"
+    },
+    {
+      "name": "ninja",
+      "version": "1.13.2",
+      "index": "pypi",
+      "file": "wheels/ninja-1.13.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/6e/53/ebfed7b689c338dd8ebeec9c0730c8d56821292f14e2536e5f3ef1a05744/ninja-1.13.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "65a24341b5ac09fcadcc37082660be40a94174e51a937fabf6e2cae26225fa2c"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.3",
+      "index": "pypi",
+      "file": "wheels/numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/3a/1b/3b16a9bc514a440a7a0883684111dcb1ef1aee960af2ca95da8fc775f124/numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321"
+    },
+    {
+      "name": "nvidia-cublas",
+      "version": "13.1.0.3",
+      "index": "cu130",
+      "file": "wheels/nvidia_cublas-13.1.0.3-py3-none-manylinux_2_27_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cublas/nvidia_cublas-13.1.0.3-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "ee8722c1f0145ab246bccb9e452153b5e0515fd094c3678df50b2a0888b8b171"
+    },
+    {
+      "name": "nvidia-cuda-cupti",
+      "version": "13.0.85",
+      "index": "cu130",
+      "file": "wheels/nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cuda-cupti/nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl",
+      "sha256": "4eb01c08e859bf924d222250d2e8f8b8ff6d3db4721288cf35d14252a4d933c8"
+    },
+    {
+      "name": "nvidia-cuda-nvrtc",
+      "version": "13.0.88",
+      "index": "cu130",
+      "file": "wheels/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cuda-nvrtc/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "sha256": "ad9b6d2ead2435f11cbb6868809d2adeeee302e9bb94bcf0539c7a40d80e8575"
+    },
+    {
+      "name": "nvidia-cuda-runtime",
+      "version": "13.0.96",
+      "index": "cu130",
+      "file": "wheels/nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cuda-runtime/nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "7f82250d7782aa23b6cfe765ecc7db554bd3c2870c43f3d1821f1d18aebf0548"
+    },
+    {
+      "name": "nvidia-cudnn-cu13",
+      "version": "9.15.1.9",
+      "index": "cu130",
+      "file": "wheels/nvidia_cudnn_cu13-9.15.1.9-py3-none-manylinux_2_27_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cudnn-cu13/nvidia_cudnn_cu13-9.15.1.9-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "ebc9a647918df0d7298d67cfaf41579fd4c78ead9aba246f5ad9414d61b9ec4c"
+    },
+    {
+      "name": "nvidia-cufft",
+      "version": "12.0.0.61",
+      "index": "cu130",
+      "file": "wheels/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cufft/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "6c44f692dce8fd5ffd3e3df134b6cdb9c2f72d99cf40b62c32dde45eea9ddad3"
+    },
+    {
+      "name": "nvidia-cufile",
+      "version": "1.15.1.6",
+      "index": "cu130",
+      "file": "wheels/nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cufile/nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "08a3ecefae5a01c7f5117351c64f17c7c62efa5fffdbe24fc7d298da19cd0b44"
+    },
+    {
+      "name": "nvidia-curand",
+      "version": "10.4.0.35",
+      "index": "cu130",
+      "file": "wheels/nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-curand/nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "1aee33a5da6e1db083fe2b90082def8915f30f3248d5896bcec36a579d941bfc"
+    },
+    {
+      "name": "nvidia-cusolver",
+      "version": "12.0.4.66",
+      "index": "cu130",
+      "file": "wheels/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cusolver/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "0a759da5dea5c0ea10fd307de75cdeb59e7ea4fcb8add0924859b944babf1112"
+    },
+    {
+      "name": "nvidia-cusparse",
+      "version": "12.6.3.3",
+      "index": "cu130",
+      "file": "wheels/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cusparse/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "2b3c89c88d01ee0e477cb7f82ef60a11a4bcd57b6b87c33f789350b59759360b"
+    },
+    {
+      "name": "nvidia-cusparselt-cu13",
+      "version": "0.8.0",
+      "index": "cu130",
+      "file": "wheels/nvidia_cusparselt_cu13-0.8.0-py3-none-manylinux2014_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-cusparselt-cu13/nvidia_cusparselt_cu13-0.8.0-py3-none-manylinux2014_x86_64.whl",
+      "sha256": "25e30a8a7323935d4ad0340b95a0b69926eee755767e8e0b1cf8dd85b197d3fd"
+    },
+    {
+      "name": "nvidia-nccl-cu13",
+      "version": "2.28.9",
+      "index": "cu130",
+      "file": "wheels/nvidia_nccl_cu13-2.28.9-py3-none-manylinux_2_18_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-nccl-cu13/nvidia_nccl_cu13-2.28.9-py3-none-manylinux_2_18_x86_64.whl",
+      "sha256": "e4553a30f34195f3fa1da02a6da3d6337d28f2003943aa0a3d247bbc25fefc42"
+    },
+    {
+      "name": "nvidia-nvjitlink",
+      "version": "13.0.88",
+      "index": "cu130",
+      "file": "wheels/nvidia_nvjitlink-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-nvjitlink/nvidia_nvjitlink-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "sha256": "13a74f429e23b921c1109976abefacc69835f2f433ebd323d3946e11d804e47b"
+    },
+    {
+      "name": "nvidia-nvshmem-cu13",
+      "version": "3.4.5",
+      "index": "cu130",
+      "file": "wheels/nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-nvshmem-cu13/nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "290f0a2ee94c9f3687a02502f3b9299a9f9fe826e6d0287ee18482e78d495b80"
+    },
+    {
+      "name": "nvidia-nvtx",
+      "version": "13.0.85",
+      "index": "cu130",
+      "file": "wheels/nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl",
+      "url": "https://pypi.nvidia.com/nvidia-nvtx/nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl",
+      "sha256": "4936d1d6780fbe68db454f5e72a42ff64d1fd6397df9f363ae786930fd5c1cd4"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "index": "pypi",
+      "file": "wheels/packaging-26.3-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "index": "pypi",
+      "file": "wheels/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/f7/62/de5bdd77d935331f4f802edc11e4d82950f642caad6cb2f949837b8560e2/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3"
+    },
+    {
+      "name": "prompt-toolkit",
+      "version": "3.0.53",
+      "index": "pypi",
+      "file": "wheels/prompt_toolkit-3.0.53-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl",
+      "sha256": "01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2"
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.5",
+      "index": "pypi",
+      "file": "wheels/pydantic-2.13.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/eb/47/c95ffc2009878c7aac0c5e08528022dcb885933252a88b5f170058014464/pydantic-2.13.5-py3-none-any.whl",
+      "sha256": "346a034f080da3755d8e9cb5e00e8b07de1d39e4f6e2c87d8ab7cafa0b269a73"
+    },
+    {
+      "name": "pydantic-core",
+      "version": "2.46.5",
+      "index": "pypi",
+      "file": "wheels/pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/d3/f2/9e4de77a6271e07a76d2d58b11c091a979c191ed2939bf80067568b369d2/pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "6f7b393a8b3da82f5c1fc0751e6d01ac6c55b93c18226a60bdfba4a724efafd1"
+    },
+    {
+      "name": "pygments",
+      "version": "2.21.0",
+      "index": "pypi",
+      "file": "wheels/pygments-2.21.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
+      "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+    },
+    {
+      "name": "pyperclip",
+      "version": "1.11.0",
+      "index": "pypi",
+      "file": "wheels/pyperclip-1.11.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/df/80/fc9d01d5ed37ba4c42ca2b55b4339ae6e200b456be3a1aaddf4a9fa99b8c/pyperclip-1.11.0-py3-none-any.whl",
+      "sha256": "299403e9ff44581cb9ba2ffeed69c7aa96a008622ad0c46cb575ca75b5b84273"
+    },
+    {
+      "name": "pyyaml",
+      "version": "6.0.3",
+      "index": "pypi",
+      "file": "wheels/pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/74/27/e5b8f34d02d9995b80abcef563ea1f8b56d20134d8f4e5e81733b1feceb2/pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6"
+    },
+    {
+      "name": "regex",
+      "version": "2026.9.10",
+      "index": "pypi",
+      "file": "wheels/regex-2026.9.10-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/20/3b/000c79c3f9c06b7542225a5d3a7f9a85405da7224b3b9af94a491d07abea/regex-2026.9.10-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "bafa41b0dd63669e5c0f8adf3d24819efeb73c847f492eb011212eb352e69041"
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "index": "pypi",
+      "file": "wheels/requests-2.34.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
+      "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0"
+    },
+    {
+      "name": "rich",
+      "version": "15.0.0",
+      "index": "pypi",
+      "file": "wheels/rich-15.0.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl",
+      "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb"
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0",
+      "index": "pypi",
+      "file": "wheels/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774"
+    },
+    {
+      "name": "setuptools",
+      "version": "78.1.0",
+      "index": "cu130",
+      "file": "wheels/setuptools-78.1.0-py3-none-any.whl",
+      "url": "https://download.pytorch.org/whl/setuptools-78.1.0-py3-none-any.whl",
+      "sha256": "3e386e96793c8702ae83d17b853fb93d3e09ef82ec62722e61da5cd22376dcd8"
+    },
+    {
+      "name": "shellingham",
+      "version": "1.5.4",
+      "index": "pypi",
+      "file": "wheels/shellingham-1.5.4-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl",
+      "sha256": "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"
+    },
+    {
+      "name": "sympy",
+      "version": "1.14.0",
+      "index": "cu130",
+      "file": "wheels/sympy-1.14.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+      "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.23.2",
+      "index": "pypi",
+      "file": "wheels/tokenizers-0.23.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/2c/ca/ca6b93c7820df123b2662a9469e8facc826ccc94e98fdd0d615f6431e73a/tokenizers-0.23.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "41c2f84d172449b4dadb9cdc508e3e364076613c35b16e76ecfe47a60d1e3305"
+    },
+    {
+      "name": "torch",
+      "version": "2.10.0+cu130",
+      "index": "cu130",
+      "file": "wheels/torch-2.10.0+cu130-cp313-cp313-manylinux_2_28_x86_64.whl",
+      "url": "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_x86_64.whl",
+      "sha256": "7e0d9922e9e91f780b2761a0c5ebac3c15c9740bab042e1b59149afa6d6474eb"
+    },
+    {
+      "name": "tqdm",
+      "version": "4.70.1",
+      "index": "pypi",
+      "file": "wheels/tqdm-4.70.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
+      "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73"
+    },
+    {
+      "name": "transformers",
+      "version": "5.17.0",
+      "index": "pypi",
+      "file": "wheels/transformers-5.17.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e8/d0/c502b60d684adbd98a8dc7d5bb866842772b816ac4354e4608be240041ae/transformers-5.17.0-py3-none-any.whl",
+      "sha256": "78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801"
+    },
+    {
+      "name": "triton",
+      "version": "3.6.0",
+      "index": "cu130",
+      "file": "wheels/triton-3.6.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://download-r2.pytorch.org/whl/triton-3.6.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "0075039ff27765480083b1a109999bf27110f3542f1f9fad95f0f9065a36da79"
+    },
+    {
+      "name": "typer",
+      "version": "0.27.2",
+      "index": "pypi",
+      "file": "wheels/typer-0.27.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/dc/bf/205d0004930ede8f542fb58f601526fccf4ae7626075ca1e6c4de5d3d652/typer-0.27.2-py3-none-any.whl",
+      "sha256": "b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d"
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "index": "cu130",
+      "file": "wheels/typing_extensions-4.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "index": "pypi",
+      "file": "wheels/typing_inspection-0.4.4-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
+      "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147"
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "index": "pypi",
+      "file": "wheels/urllib3-2.8.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
+      "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3"
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.8.4",
+      "index": "pypi",
+      "file": "wheels/wcwidth-0.8.4-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/39/cc/9c0adc5861020de426ec71716b6c1bef8d90694b7d6d0a16202cdb1647f5/wcwidth-0.8.4-py3-none-any.whl",
+      "sha256": "2097bb1d28a0ba8fe177c2eb607317f9b1627b03f33ebebfd3da670b337a65ba"
+    },
+    {
+      "name": "wheel",
+      "version": "0.48.0",
+      "index": "pypi",
+      "file": "wheels/wheel-0.48.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl",
+      "sha256": "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab"
+    }
+  ],
+  "serve_wheels": [
+    {
+      "name": "attrs",
+      "version": "25.4.0",
+      "index": "pypi",
+      "file": "serve-wheels/attrs-25.4.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/3a/2a/7cc015f5b9f5db42b7d48157e23356022889fc354a2813c15934b7cb5c0e/attrs-25.4.0-py3-none-any.whl",
+      "sha256": "adcf7e2a1fb3b36ac48d97835bb6d8ade15b8dcce26aba8bf1d14847b57a3373"
+    },
+    {
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "index": "pypi",
+      "file": "serve-wheels/jsonschema-4.26.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/69/90/f63fb5873511e014207a475e2bb4e8b2e570d655b00ac19a9a0ca0a385ee/jsonschema-4.26.0-py3-none-any.whl",
+      "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce"
+    },
+    {
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "index": "pypi",
+      "file": "serve-wheels/jsonschema_specifications-2025.9.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl",
+      "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe"
+    },
+    {
+      "name": "referencing",
+      "version": "0.37.0",
+      "index": "pypi",
+      "file": "serve-wheels/referencing-0.37.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl",
+      "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231"
+    },
+    {
+      "name": "rpds-py",
+      "version": "0.30.0",
+      "index": "pypi",
+      "file": "serve-wheels/rpds_py-0.30.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/b7/de/f7192e12b21b9e9a68a6d0f249b4af3fdcdff8418be0767a627564afa1f1/rpds_py-0.30.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "9027da1ce107104c50c81383cae773ef5c24d296dd11c99e2629dbd7967a20c6"
+    }
+  ]
+}
