@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "161247dd973c11f0cd25ec27990f2f5fb8025dfe1902f8a6007a3e0704322910",
+  "series_sha256": "c61011728779d2b013d4f8ea3d76e6dcdc66ba2738791e0a10a7abb285084d4d",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -201,6 +201,10 @@
     {
       "name": "9503b-prefill-m4096-stage1088.patch",
       "sha256": "47a8aea76518df7d1c8cd75a97196147b62ad15422704f9ca62fcb16a500bcb7"
+    },
+    {
+      "name": "9601-tree-verify-pipe.patch",
+      "sha256": "541486176f3af0cd8887ae6395216dc009c1ea484df9f733c09dd79663ed2cc9"
     }
   ],
   "files": {
@@ -246,7 +250,7 @@
     },
     "exllamav3_ext/bindings.cpp": {
       "pre": "381d867b845335b15106f86aa79e284c9d6b7d316703dd555d8a86a13ed2b465",
-      "post": "1808ccfe80cd7597fb37e0303dd613272c0364a00025e82d48866ae0e826ce6d"
+      "post": "6028d5b0f57f7636fbbfcf1c3da7d25e92fecfc38376ef344404a24b744d513d"
     },
     "exllamav3_ext/dflash2.cu": {
       "pre": "dd5023eea10408948da25b68e4d6242628704886c261c1c63bd5213887298250",
@@ -448,13 +452,21 @@
       "pre": null,
       "post": "6d15ae0797f1af34ec4f6aa75760595cf9a82b1dfd8321bbfabd26ea0172d4fa"
     },
+    "exllamav3_ext/tree_pipe.cu": {
+      "pre": null,
+      "post": "a4a9c6b62c149c198185d102d2b90a21f83e3d00ff468d1bee4a3681d40bea0b"
+    },
+    "exllamav3_ext/tree_pipe.cuh": {
+      "pre": null,
+      "post": "63538570653a85f75afeac6a755ed30bdcaf40e0a2c19f0589caa0b7d511376c"
+    },
     "generator/gdn_rewind.py": {
       "pre": "08bf319ae372a26cb85d3a39896e0001bf2d3dbe4c9adf21bb58012c8eedb49a",
       "post": "0f4a84912f823328e4501784ebcfac24f6e9cb475ae64fa647d5d127139cc940"
     },
     "generator/generator.py": {
       "pre": "ee378f92cbe59fbe4c18739e1ff75c366d084f8460279f8ed69f3b3aa123a232",
-      "post": "60b2ab0e234b37ca3a153f44506cc13a3c300173028e301875c94cc911f09b57"
+      "post": "5c602e77173e8a5a1b36496dbfc909d9fd611580af39c9a935fd32c0f2335a72"
     },
     "generator/job.py": {
       "pre": "4564b54b589fa045c9452f4e5e39cb304a090e06714f6f0d2428cbb261eab04b",
@@ -467,6 +479,10 @@
     "generator/persist.py": {
       "pre": null,
       "post": "81a0213fe02399b84df5f051fbd23f0d6c02774f61c209f4c14b40fb81bba264"
+    },
+    "generator/tree_pipe.py": {
+      "pre": null,
+      "post": "02ef637fae86e897f0cdf618a3c79f9c6bc1c4fc43b06c4e9b1e8c878c196fe0"
     },
     "model/model.py": {
       "pre": "013edc062e64d8fad98695491dd3fd504723752377db7e8f338c88e5afb85448",
@@ -502,7 +518,7 @@
     },
     "modules/embedding.py": {
       "pre": "11e0075c96988503ef19b46b91e072d281b44fb53385d38d275c7ff00bcecd89",
-      "post": "49c9fc0e0b97784d4f27bc601e3a9a3c4e887dd75e97af4b09e2f51c8f2b4bcd"
+      "post": "f0efc770a211538953a2c67c409e31694b2b5eeb43ed147d771a8005ef75cdec"
     },
     "modules/gated_delta_net.py": {
       "pre": "955f2ae25509ccf695dac4b79721115bc51d9d63a7f6f1eeb0a42671b685cf5a",

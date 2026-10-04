@@ -1,0 +1,734 @@
+--- a/exllamav3_ext/bindings.cpp
++++ b/exllamav3_ext/bindings.cpp
+@@ -47,6 +47,7 @@
+ 
+ #include "cache/q_cache.cuh"
+ #include "kv_compact.cuh"
++#include "tree_pipe.cuh"
+ #include "pattn.cuh"
+ 
+ #include "histogram.cuh"
+@@ -268,6 +269,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
+         .def(py::init<const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&>(),
+              py::arg("qk"), py::arg("qv"), py::arg("sk"), py::arg("sv"));
+     m.def("kv_compact_rows", &kv_compact_rows, py::arg("layer_jobs"), py::arg("moves"), py::arg("device_index"));
++    m.def("tree_verify_stage", &tree_verify_stage, py::arg("rec"), py::arg("base"), py::arg("table"), py::arg("dev"),
++          py::arg("x"), py::arg("rows"));
+     m.def("pattn_prefill", &pattn_prefill, "pattn_prefill");
+     m.def("pattn_int8_qk_enabled", &pattn_int8_qk_enabled, "pattn_int8_qk_enabled");
+     m.def("pattn_stage_int8k", &pattn_stage_int8k, "pattn_stage_int8k");
+--- /dev/null
++++ b/exllamav3_ext/tree_pipe.cu
+@@ -0,0 +1,113 @@
++#include <cuda_fp16.h>
++#include <cuda_bf16.h>
++#include "tree_pipe.cuh"
++#include <c10/cuda/CUDAGuard.h>
++#include <ATen/cuda/CUDAContext.h>
++#include "util.h"
++#include "util.cuh"
++
++// ext 9601: see tree_pipe.cuh. Grid (CEIL(hidden / 256), 8): block (bx, r) gathers columns
++// bx * 256 + t of row r; block (0, 0) also writes the 160-byte verify buffer (threads 0..127 the
++// TreeDesc bytes, threads 0..7 the positions). Every output element is written by exactly one
++// thread, from inputs no thread writes.
++
++#define TREE_PIPE_ROWS 8
++#define TREE_PIPE_TOKEN_BYTES 64     // the record's 8 int64 row tokens
++#define TREE_PIPE_DESC_BYTES 128     // TreeDesc, at record offset 64
++#define TREE_PIPE_DEPTH 16           // TreeDesc depth u8[8] offset
++#define TREE_PIPE_REC_BYTES (TREE_PIPE_TOKEN_BYTES + TREE_PIPE_DESC_BYTES)
++#define TREE_PIPE_DEV_BYTES (TREE_PIPE_DESC_BYTES + 4 * TREE_PIPE_ROWS)
++#define TREE_PIPE_THREADS 256
++
++template <typename in_t> __device__ __forceinline__ float tree_pipe_widen(in_t v);
++template <> __device__ __forceinline__ float tree_pipe_widen<half>(half v) { return __half2float(v); }
++template <> __device__ __forceinline__ float tree_pipe_widen<__nv_bfloat16>(__nv_bfloat16 v) { return __bfloat162float(v); }
++template <> __device__ __forceinline__ float tree_pipe_widen<float>(float v) { return v; }
++
++template <typename in_t>
++__global__ __launch_bounds__(TREE_PIPE_THREADS)
++void tree_verify_stage_kernel
++(
++    const uint8_t* __restrict__ rec,
++    const int base,
++    const in_t* __restrict__ table,
++    const int64_t vocab,
++    const int hidden,
++    uint8_t* __restrict__ dev,
++    float* __restrict__ x,
++    float* __restrict__ rows
++)
++{
++    const int r = blockIdx.y;
++    const int t = threadIdx.x;
++    if (blockIdx.x == 0 && r == 0)
++    {
++        if (t < TREE_PIPE_DESC_BYTES)
++            dev[t] = rec[TREE_PIPE_TOKEN_BYTES + t];
++        if (t < TREE_PIPE_ROWS)
++            reinterpret_cast<int*>(dev + TREE_PIPE_DESC_BYTES)[t] =
++                base + (int) rec[TREE_PIPE_TOKEN_BYTES + TREE_PIPE_DEPTH + t];
++    }
++
++    const int c = blockIdx.x * TREE_PIPE_THREADS + t;
++    if (c >= hidden) return;
++    const int64_t id = reinterpret_cast<const int64_t*>(rec)[r];
++    const bool valid = 0 <= id && id < vocab;
++    const float v = valid ? tree_pipe_widen<in_t>(table[id * (int64_t) hidden + c]) : 0.0f;
++    x[(int64_t) r * hidden + c] = v;
++    rows[(int64_t) r * hidden + c] = v;
++}
++
++void tree_verify_stage
++(
++    const at::Tensor& rec,
++    int64_t base,
++    const at::Tensor& table,
++    const at::Tensor& dev,
++    const at::Tensor& x,
++    const at::Tensor& rows
++)
++{
++    TORCH_CHECK(rec.is_cuda() && rec.dtype() == at::kByte && rec.is_contiguous() && rec.numel() == TREE_PIPE_REC_BYTES,
++                "tree_verify_stage: rec must be a contiguous CUDA uint8 tensor of ", TREE_PIPE_REC_BYTES, " bytes");
++    TORCH_CHECK(reinterpret_cast<uintptr_t>(rec.data_ptr()) % 8 == 0, "tree_verify_stage: rec is not 8-byte aligned");
++    TORCH_CHECK(dev.is_cuda() && dev.dtype() == at::kByte && dev.is_contiguous() && dev.numel() == TREE_PIPE_DEV_BYTES,
++                "tree_verify_stage: dev must be a contiguous CUDA uint8 tensor of ", TREE_PIPE_DEV_BYTES, " bytes");
++    TORCH_CHECK(reinterpret_cast<uintptr_t>(dev.data_ptr()) % 4 == 0, "tree_verify_stage: dev is not 4-byte aligned");
++    TORCH_CHECK(table.device().is_cpu() && table.dim() == 2 && table.is_contiguous(),
++                "tree_verify_stage: table must be a contiguous 2D CPU tensor in mapped pinned memory");
++    TORCH_CHECK(table.dtype() == at::kHalf || table.dtype() == at::kBFloat16 || table.dtype() == at::kFloat,
++                "tree_verify_stage: table must be half, bfloat16 or float32");
++    const int64_t vocab = table.size(0);
++    const int64_t hidden = table.size(1);
++    TORCH_CHECK(hidden > 0 && hidden <= (1 << 20), "tree_verify_stage: unsupported hidden size ", hidden);
++    for (const at::Tensor* t : {&x, &rows})
++    {
++        TORCH_CHECK(t->is_cuda() && t->dtype() == at::kFloat && t->is_contiguous() && t->dim() == 2 &&
++                    t->size(0) == TREE_PIPE_ROWS && t->size(1) == hidden,
++                    "tree_verify_stage: x and rows must be contiguous CUDA float32 [8, hidden] tensors");
++        TORCH_CHECK(t->device() == rec.device(), "tree_verify_stage: x and rows must be on rec's device");
++    }
++    TORCH_CHECK(dev.device() == rec.device(), "tree_verify_stage: dev must be on rec's device");
++    TORCH_CHECK(x.data_ptr() != rows.data_ptr(), "tree_verify_stage: x and rows must be distinct buffers");
++    TORCH_CHECK(base >= 0 && base + 255 < ((int64_t) 1 << 31), "tree_verify_stage: position base ", base, " out of range");
++
++    const c10::cuda::CUDAGuard device_guard(rec.device());
++    // The mapped storage must be addressable from this device (UVA: the host address itself)
++    cudaPointerAttributes attr;
++    const cudaError_t attr_error = cudaPointerGetAttributes(&attr, table.data_ptr());
++    TORCH_CHECK(attr_error == cudaSuccess, "tree_verify_stage: cudaPointerGetAttributes(table): ", cudaGetErrorString(attr_error));
++    TORCH_CHECK(attr.type == cudaMemoryTypeHost && attr.devicePointer != nullptr,
++                "tree_verify_stage: table storage is not registered as mapped pinned memory");
++    cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
++    dim3 blocks((unsigned) CEIL_DIVIDE(hidden, (int64_t) TREE_PIPE_THREADS), TREE_PIPE_ROWS);
++    #define TREE_PIPE_LAUNCH(in_t) \
++        tree_verify_stage_kernel<in_t><<<blocks, TREE_PIPE_THREADS, 0, stream>>>( \
++            (const uint8_t*) rec.data_ptr(), (int) base, (const in_t*) attr.devicePointer, vocab, (int) hidden, \
++            (uint8_t*) dev.data_ptr(), (float*) x.data_ptr(), (float*) rows.data_ptr())
++    if (table.dtype() == at::kHalf) TREE_PIPE_LAUNCH(half);
++    else if (table.dtype() == at::kBFloat16) TREE_PIPE_LAUNCH(__nv_bfloat16);
++    else TREE_PIPE_LAUNCH(float);
++    #undef TREE_PIPE_LAUNCH
++    cuda_check(cudaPeekAtLastError());
++}
+--- /dev/null
++++ b/exllamav3_ext/tree_pipe.cuh
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include <ATen/Tensor.h>
++#include <cstdint>
++
++// ext 9601 (tree pipe): device staging of one 8-row tree verify round, so the verify forward is
++// launched straight after the draft, without reading the builder record back first.
++//
++// rec: the tree builder's record (ext 9008), CUDA uint8 [1, 192]: the 8 row tokens as int64
++// (row 0 the anchor), then the 128-byte TreeDesc. One launch writes, in stream order after the
++// builder:
++// - dev, CUDA uint8 [160]: dev[i] = rec[64 + i] for i < 128 (the TreeDesc), then int32
++//   pos[r] = base + rec[64 + 16 + r] for r < 8 (row position = base + depth[r]): the 160 bytes
++//   the host's tree_round.verify_bytes(desc, depth, base) uploads in the sequential round;
++// - x and rows, CUDA float32 [8, hidden]: row r = table[token r] widened to float32 (exact), the
++//   target embedding's host-path output for the row tokens. x feeds the verify (its residual
++//   stream is updated in place); rows is the copy the host reads back and checks. Both get
++//   the same value from the same load.
++// table: the target embedding, a contiguous CPU [vocab, hidden] half / bfloat16 / float32 tensor
++// whose storage is registered as mapped pinned memory (read over the bus with its device
++// pointer). A token outside [0, vocab) writes zero rows; the host check rejects such a record
++// (the sequential round raises on it) before anything is committed.
++// base: 0 <= base and base + 255 < 2^31 (checked), so every int32 position equals the Nat sum.
++void tree_verify_stage
++(
++    const at::Tensor& rec,
++    int64_t base,
++    const at::Tensor& table,
++    const at::Tensor& dev,
++    const at::Tensor& x,
++    const at::Tensor& rows
++);
+--- a/generator/generator.py
++++ b/generator/generator.py
+@@ -22,6 +22,7 @@ from .sampler.custom import CustomSampler, SS_Fused
+ from .greedy_accept import GreedyAccept
+ from .gdn_rewind import RewindPlans
+ from . import tree_round
++from . import tree_pipe
+ from .visualizer import CacheVisualizer
+ import time
+ import threading
+@@ -286,8 +287,11 @@ class Generator:
+ 
+     def _tree_configure(self, environ):
+         self.tree, self.tree_force_chain = tree_round.switches(environ)
++        pipe, pipe_fault = tree_pipe.switches(environ, self.tree)
+         self.tree_verify_rounds = 0
+         self.tree_mode = None
++        self.tree_pipe = None
++        self.tree_staged = None
+         if self.tree:
+             unsupported = self._tree_unsupported()
+             if unsupported is None:
+@@ -296,6 +300,18 @@ class Generator:
+                 raise ValueError(f"EXL3_TREE=1: {unsupported}")
+             else:
+                 self.tree = False
++        if pipe and not self.tree:
++            raise ValueError("EXL3_TREE_PIPE=1 requires the tree verify")
++        # Tree pipe (ext 9601, generator/tree_pipe.py): on wherever the tree runs and the target embedding
++        # qualifies unless EXL3_TREE_PIPE=0; EXL3_TREE_PIPE=1 on a target that does not qualify fails
++        if self.tree and pipe is not False:
++            emb = tree_pipe.target_embedding(self.model, self.tree_out.device)
++            if not isinstance(emb, str):
++                self.tree_pipe = tree_pipe.TreePipe(emb, self.tree_out, self.tree_dev, pipe_fault)
++            elif pipe:
++                raise ValueError(f"EXL3_TREE_PIPE=1: {emb}")
++        if pipe_fault and self.tree_pipe is None:
++            raise ValueError("EXL3_TREE_PIPE_FAULT requires the tree pipe")
+ 
+ 
+     def _tree_unsupported(self) -> str | None:
+@@ -336,38 +352,67 @@ class Generator:
+         self.tree_rows_stage = [torch.zeros((rows,), dtype = torch.long, pin_memory = True) for _ in range(2)]
+ 
+ 
+-    def _tree_draft_mode(self) -> int:
+-        """Builder mode of this round's draft: 1 (dynamic tree) for the one greedy-eligible sequence, else 0."""
++    def _tree_round_job(self, what: str) -> Job:
+         jobs = [job for job in self.active_jobs if job.is_prefill_done()]
+         if len(jobs) != 1 or len(jobs[0].sequences) != 1:
+-            raise RuntimeError("EXL3_TREE=1 drafts for exactly one sequence")
+-        return 0 if self.tree_force_chain or not self._greedy_verify_eligible(jobs[0]) else 1
++            raise RuntimeError(f"EXL3_TREE=1 {what} exactly one sequence")
++        return jobs[0]
+ 
+ 
+-    def _tree_verify_prepare(self, staging_set: int) -> tree_round.TreeRound:
+-        """Check this round's builder record and upload the verify descriptor (DESIGN.md §2.3)."""
+-        mode, self.tree_mode = self.tree_mode, None
++    def _tree_base(self, job: Job) -> int:
++        # Row positions = the chain's positions[b] + row (iterate_gen: kv_position, plus the job's MRoPE text
++        # offset on targets with the mrope cap) with row -> depth, so a CHAIN row gets the same int as cs12
++        return job.sequences[0].kv_position + (job.alt_rope_offset if "mrope" in self.model.caps else 0)
++
++
++    def _tree_draft_mode(self) -> int:
++        """Builder mode of this round's draft: 1 (dynamic tree) for the one greedy-eligible sequence, else 0."""
++        job = self._tree_round_job("drafts for")
++        return 0 if self.tree_force_chain or not self._greedy_verify_eligible(job) else 1
++
++
++    def _tree_check_record(self, mode: int | None) -> tuple[tree_round.TreeRound, int]:
++        """Check this round's builder record against the host (and the proven derive); (round, position base)."""
+         if mode is None:
+             raise RuntimeError("Tree verify: no drafted tree for this round")
+-        jobs = [job for job in self.active_jobs if job.is_prefill_done()]
+-        if len(jobs) != 1 or len(jobs[0].sequences) != 1:
+-            raise RuntimeError("EXL3_TREE=1 verifies exactly one sequence")
+-        seq = jobs[0].sequences[0]
++        job = self._tree_round_job("verifies")
++        seq = job.sequences[0]
+         anchor_ids = seq.sequence_ids.torch_slice(seq.kv_position, None)
+         if anchor_ids.shape[-1] != 1:
+             raise RuntimeError("Tree verify: the sequence has more than one uncached token")
+         raw = self.tree_out_pinned.numpy().tobytes()
+         rnd = tree_round.check_output(raw, mode, int(anchor_ids[0, 0]), self.tree_accept.derive)
++        return rnd, self._tree_base(job)
++
++
++    def _tree_upload(self, rnd: tree_round.TreeRound, base: int, staging_set: int):
++        """Upload the verify descriptor and row positions into the tree-mode verify graphs' static buffer."""
+         stage = self.tree_stage[staging_set]
+-        # Row positions = the chain's positions[b] + row (iterate_gen: kv_position, plus the job's MRoPE text
+-        # offset on targets with the mrope cap) with row -> depth, so a CHAIN row gets the same int as cs12
+-        base = seq.kv_position + (jobs[0].alt_rope_offset if "mrope" in self.model.caps else 0)
+         stage.copy_(torch.frombuffer(bytearray(tree_round.verify_bytes(rnd.desc, rnd.depth, base)),
+                                      dtype = torch.uint8))
+         self.tree_dev.copy_(stage, non_blocking = True)
++
++
++    def _tree_verify_prepare(self, staging_set: int) -> tree_round.TreeRound:
++        """Check this round's builder record and upload the verify descriptor (DESIGN.md §2.3)."""
++        mode, self.tree_mode = self.tree_mode, None
++        rnd, base = self._tree_check_record(mode)
++        self._tree_upload(rnd, base, staging_set)
+         return rnd
+ 
+ 
++    def _tree_pipe_stage(self, mode: int) -> tree_pipe.Staged | None:
++        """
++        Stage this round's verify inputs on the device right after the tree builder (ext 9601) when the round
++        commits through the greedy path (the one sequence is greedy-eligible, text-only); None otherwise, and
++        iterate_gen then runs the sequential round.
++        """
++        job = self._tree_round_job("drafts for")
++        if not self._greedy_verify_eligible(job) or job.embeddings:
++            return None
++        return self.tree_pipe.stage(mode, self._tree_base(job))
++
++
+     def num_remaining_jobs(self):
+         return len(self.pending_jobs) + len(self.active_jobs)
+ 
+@@ -910,6 +955,7 @@ class Generator:
+     def iterate_draftmodel_dflash_gen(self, results: list):
+ 
+         self._draft_conf_round = None
++        self.tree_staged = None
+ 
+         # Get shape of active batch
+         batch_size = 0
+@@ -1017,6 +1063,10 @@ class Generator:
+                 raise RuntimeError("Tree draft: the drafted ids are not the builder record's rows 1..7")
+             self.tree_out_pinned.copy_(self.tree_out, non_blocking = True)
+             self.tree_mode = tree_mode
++            # ext 9601: stage the verify inputs on the device now, so iterate_gen launches the verify without
++            # waiting for this draft (it checks the record and the staged inputs after the launch)
++            if self.tree_pipe is not None:
++                self.tree_staged = self._tree_pipe_stage(tree_mode)
+         self.draft_ids_ready = torch.cuda.Event()
+         self.draft_ids_ready.record(torch.cuda.current_stream(new_ids.device))
+         return self.draft_ids_pinned[:, :window]
+@@ -1114,6 +1164,68 @@ class Generator:
+         return n if n <= window else 0
+ 
+ 
++    def _batch_ids(self, input_ids_list: list[torch.Tensor]) -> torch.Tensor:
++        ids_width = input_ids_list[0].shape[-1]
++        if all(ids.shape[-1] == ids_width for ids in input_ids_list):
++            ids_staging = self._staging("batch_ids", len(input_ids_list), ids_width, torch.long)
++            return torch.cat(input_ids_list, dim = 0, out = ids_staging)
++        return torch.cat(input_ids_list, dim = 0)
++
++
++    @staticmethod
++    def _tree_check_drafts(draft_tokens: torch.Tensor, rnd: tree_round.TreeRound):
++        # draft_tokens is draft_ids_pinned[:, :window]: one row per constructor batch slot (the pinned buffer
++        # is sized before the recurrent-slot clamp); the one verified sequence is row 0
++        if draft_tokens.dim() != 2 or draft_tokens.shape[1] != tree_round.WINDOW:
++            raise RuntimeError(f"Tree verify: drafted ids have shape {tuple(draft_tokens.shape)}, "
++                               f"expected (rows, {tree_round.WINDOW})")
++        if draft_tokens[0].tolist() != rnd.tokens[1:]:
++            raise RuntimeError(f"Tree verify: drafted ids {draft_tokens[0].tolist()} differ from the builder "
++                               f"record rows 1..7 {rnd.tokens[1:]}")
++
++
++    def _tree_pipe_settle(self, staged, snap, draft_ids_ready, draft_tokens, staging_set, batch_jobs, batch_logits,
++                          params, verify_forward):
++        """
++        ext 9601, after the staged round's verify launch: the sequential round's check of the builder record and
++        of the drafted ids, then the bit-exact comparison of what the verify consumed with what the sequential
++        round uploads (TreePipe.same). Equal: the speculative verify is the round's, and the page bookkeeping the
++        sequential round does before its verify runs now (nothing between reads it). Different: the speculative
++        verify is discarded and the round is recomputed through the sequential path. A failed check discards
++        it and raises as the sequential round does. Returns (round, logits, params) of the verify the round
++        commits.
++        """
++        # Stream order: draft -> readback copies -> stage -> event -> side-stream copies -> checked
++        staged.checked.synchronize()
++        if draft_ids_ready is not None:
++            draft_ids_ready.synchronize()
++        mode, self.tree_mode = self.tree_mode, None
++        try:
++            if mode != staged.mode:
++                raise RuntimeError(f"Tree pipe: staged mode {staged.mode} differs from the drafted mode {mode}")
++            rnd, base = self._tree_check_record(mode)
++            self._tree_check_drafts(draft_tokens, rnd)
++            if base != staged.base:
++                raise RuntimeError(f"Tree pipe: staged position base {staged.base} differs from {base}")
++            same = self.tree_pipe.same(staged, rnd)
++        except BaseException:
++            self.tree_pipe.discard(snap)
++            raise
++        idx = 0
++        input_ids_list = []
++        for job in batch_jobs:
++            ids = job.get_input_ids_list(draft_tokens, idx, add_to_cache = True)
++            idx += len(ids)
++            input_ids_list += ids
++        if same:
++            return rnd, batch_logits, params
++        logger.warning("Tree pipe: the staged verify inputs differ from the host upload; recomputing the round")
++        self.tree_pipe.discard(snap)
++        self._tree_upload(rnd, base, staging_set)
++        batch_logits, params = verify_forward(self._batch_ids(input_ids_list), None, True)
++        return rnd, batch_logits, params
++
++
+     def iterate_gen(self, results: list, draft_tokens: torch.Tensor | None = None):
+ 
+         # Get shape of active batch
+@@ -1159,24 +1271,21 @@ class Generator:
+                     positions[batch] = seq.kv_position + job.alt_rope_offset
+                 batch += 1
+ 
+-        # A DFlash draft's tokens were read back asynchronously
++        # A DFlash draft's tokens were read back asynchronously. ext 9601: a round the draft staged on the device
++        # launches its verify first and reads them back afterwards (_tree_pipe_settle)
+         draft_ids_ready, self.draft_ids_ready = self.draft_ids_ready, None
+-        if draft_ids_ready is not None:
++        staged, self.tree_staged = self.tree_staged, None
++        if staged is not None and not (self.tree and draft_tokens is not None):
++            raise RuntimeError("Tree pipe: a staged round without a tree verify")
++        if draft_ids_ready is not None and staged is None:
+             draft_ids_ready.synchronize()
+ 
+         # Tree mode: check the builder record against the host (and the proven derive), then upload the verify
+         # descriptor and row positions into the static buffer the tree-mode verify graphs read
+         tree_rnd = None
+-        if self.tree and draft_tokens is not None:
++        if self.tree and draft_tokens is not None and staged is None:
+             tree_rnd = self._tree_verify_prepare(staging_set)
+-            # draft_tokens is draft_ids_pinned[:, :window]: one row per constructor batch slot (the pinned buffer
+-            # is sized before the recurrent-slot clamp); the one verified sequence is row 0
+-            if draft_tokens.dim() != 2 or draft_tokens.shape[1] != tree_round.WINDOW:
+-                raise RuntimeError(f"Tree verify: drafted ids have shape {tuple(draft_tokens.shape)}, "
+-                                   f"expected (rows, {tree_round.WINDOW})")
+-            if draft_tokens[0].tolist() != tree_rnd.tokens[1:]:
+-                raise RuntimeError(f"Tree verify: drafted ids {draft_tokens[0].tolist()} differ from the builder "
+-                                   f"record rows 1..7 {tree_rnd.tokens[1:]}")
++            self._tree_check_drafts(draft_tokens, tree_rnd)
+ 
+         # Collect input IDs and indexed embeddings
+         # Jobs may contribute multiple sequence rows. logit_mapping records the slice of the model output that
+@@ -1191,17 +1300,19 @@ class Generator:
+             if job.time_first_token is None:
+                 cuda_sync_active()
+                 job.time_first_token = time.time()
+-            job_ids = job.get_input_ids_list(draft_tokens, len(input_ids_list), add_to_cache = True)
++            if staged is not None:
++                # The record's row tokens on the device; the verify reads their staged embedding rows
++                job_ids = [staged.ids]
++            else:
++                job_ids = job.get_input_ids_list(draft_tokens, len(input_ids_list), add_to_cache = True)
+             input_ids_list += job_ids
+             batch_jobs.append(job)
+             active_embeddings += job.embeddings
+         logit_mapping.append(len(input_ids_list))
+-        ids_width = input_ids_list[0].shape[-1]
+-        if all(ids.shape[-1] == ids_width for ids in input_ids_list):
+-            ids_staging = self._staging("batch_ids", len(input_ids_list), ids_width, torch.long)
+-            batch_ids = torch.cat(input_ids_list, dim = 0, out = ids_staging)
++        if staged is not None:
++            batch_ids = staged.ids
+         else:
+-            batch_ids = torch.cat(input_ids_list, dim = 0)
++            batch_ids = self._batch_ids(input_ids_list)
+ 
+         # Collect recurrent states for batch
+         # Recurrent models carry mutable state beside the K/V cache; pass one state object per compact batch job so
+@@ -1223,28 +1334,42 @@ class Generator:
+ 
+         # Get logit batch from model. Forward writes new K/V entries into the cache for the supplied positions and
+         # returns logits for either one target token or a target-plus-draft verification window.
+-        params = {
+-            "attn_mode": "flash_attn",
+-            "block_table": block_index,
+-            "cache": self.cache,
+-            "cache_seqlens": cache_seqlens,
+-            "recurrent_states": batch_states,
+-            "indexed_embeddings": active_embeddings,
+-            "positions": positions,
+-            "recurrent_history": draft_tokens is not None,
+-            "pinned_staging": True,
+-        }
+-        if self.draft_model:
+-            params.update(self.draft_model.draft_verifier_params)
+-        if tree_rnd is not None:
+-            params["tree_desc"] = self.tree_dev
+-            params["position_ids"] = self.tree_pos
+-            # position_ids replaces the per-sequence positions (the kernels accept exactly one of the two)
+-            params["positions"] = None
+-        batch_logits = self.model.forward(
+-            input_ids = batch_ids,
+-            params = params,
+-        )
++        def verify_forward(ids: torch.Tensor, staged_: tree_pipe.Staged | None, tree_: bool) -> tuple[torch.Tensor, dict]:
++            params_ = {
++                "attn_mode": "flash_attn",
++                "block_table": block_index,
++                "cache": self.cache,
++                "cache_seqlens": cache_seqlens,
++                "recurrent_states": batch_states,
++                "indexed_embeddings": active_embeddings,
++                "positions": positions,
++                "recurrent_history": draft_tokens is not None,
++                "pinned_staging": True,
++            }
++            if self.draft_model:
++                params_.update(self.draft_model.draft_verifier_params)
++            if tree_:
++                params_["tree_desc"] = self.tree_dev
++                params_["position_ids"] = self.tree_pos
++                # position_ids replaces the per-sequence positions (the kernels accept exactly one of the two)
++                params_["positions"] = None
++            if staged_ is not None:
++                params_["embedded"] = staged_.x
++            logits_ = self.model.forward(
++                input_ids = ids,
++                params = params_,
++            )
++            return logits_, params_
++
++        if staged is not None:
++            snap = self.tree_pipe.snapshot(batch_states[0])
++            batch_logits, params = verify_forward(batch_ids, staged, True)
++            tree_rnd, batch_logits, params = self._tree_pipe_settle(
++                staged, snap, draft_ids_ready, draft_tokens, staging_set, batch_jobs, batch_logits, params,
++                verify_forward,
++            )
++        else:
++            batch_logits, params = verify_forward(batch_ids, None, tree_rnd is not None)
+ 
+         # Keep only the fields needed below for draft-cache updates and drop the params dict so it cannot extend
+         # references to recurrent state objects past this iteration.
+--- /dev/null
++++ b/generator/tree_pipe.py
+@@ -0,0 +1,191 @@
++"""
++Pipelined tree verify round (elpis-fast ext 9601, bend/tree_pipe*.bend).
++
++The sequential tree round (0006-tree-verify) waits for the draft, reads the builder record back, checks it
++(tree_round.check_output), uploads the verify descriptor and positions, embeds the row tokens on the host and
++only then launches the verify forward: the GPU idles from the end of the draft until the first verify kernel.
++
++Here the draft's stream also runs ext.tree_verify_stage right after the tree builder: it copies the record's
++TreeDesc into the verify's static buffer, writes the positions base + depth[r] and gathers the row tokens'
++embedding rows from the mapped host table, so the verify forward is launched while the draft still runs. A
++side stream reads back what the verify consumes (the 160 descriptor/position bytes and the embedded rows). After
++the launch the host runs the sequential round's own check on the record and compares the readback with the
++bytes the sequential round would have uploaded (tree_round.verify_bytes) and the rows its host embedding
++computes, bit for bit:
++- record rejected: the speculative verify is discarded and the round fails exactly as the sequential one;
++- readback differs: the speculative verify is discarded (no GDN commit, the recurrent state's position and
++  history restored, K/V rows past the committed position overwritten later) and the round is recomputed
++  through the sequential path;
++- equal: the verify consumed exactly the sequential round's inputs, so its outputs are the sequential
++  round's, and the round commits them.
++EXL3_TREE_PIPE strict 0|1 (default: on wherever the tree runs and the target embedding qualifies; 1 on a
++configuration that cannot run it fails construction). EXL3_TREE_PIPE_FAULT=k (test hook, default 0) adds 1 to
++the staged positions on every k-th staged round, so the verify consumes a wrong buffer and the discard path
++runs.
++"""
++
++from __future__ import annotations
++import torch
++from ..ext import exllamav3_ext as ext
++from ..modules.embedding import Embedding
++from . import tree_round
++
++# cudaHostRegisterPortable | cudaHostRegisterMapped; cudaErrorHostMemoryAlreadyRegistered
++_HOST_REGISTER_FLAGS = 3
++_ALREADY_REGISTERED = 712
++
++
++def switches(environ, tree: bool) -> tuple[bool | None, int]:
++    """
++    (EXL3_TREE_PIPE, EXL3_TREE_PIPE_FAULT). The pipe is None when unset (on where supported), True / False
++    when set; the fault period is a non-negative int (0 = off) and needs the pipe.
++    """
++    raw = environ.get("EXL3_TREE_PIPE")
++    pipe = None if raw is None else tree_round.parse_switch("EXL3_TREE_PIPE", raw, False)
++    raw_fault = environ.get("EXL3_TREE_PIPE_FAULT")
++    fault = 0
++    if raw_fault is not None:
++        if not raw_fault.isdigit() or raw_fault != str(int(raw_fault)):
++            raise ValueError(f"EXL3_TREE_PIPE_FAULT must be a non-negative integer, got {raw_fault!r}")
++        fault = int(raw_fault)
++    if pipe and not tree:
++        raise ValueError("EXL3_TREE_PIPE=1 requires the tree verify (EXL3_TREE=1)")
++    if fault and (pipe is False or not tree):
++        raise ValueError("EXL3_TREE_PIPE_FAULT requires the tree pipe")
++    return pipe, fault
++
++
++def target_embedding(model, device: torch.device) -> Embedding | str:
++    """
++    The target's input Embedding when the device stage reproduces its host path exactly and the first block
++    runs on the tree buffers' device, else why not.
++    """
++    if getattr(model, "loaded_tp", False):
++        return "requires a target loaded without tensor parallelism"
++    emb = model.modules[0] if len(model.modules) > 1 else None
++    if type(emb) is not Embedding or emb.embedding is None:
++        return "requires the target's first module to be its Embedding"
++    if torch.device(model.modules[1].device) != torch.device(device):
++        return "requires the target's first block on the tree buffers' device"
++    weight = emb.embedding.weight
++    if (
++        emb.normalize or emb.multiplier != 1.0 or emb.out_dtype != torch.float or weight.device.type != "cpu" or
++        weight.dim() != 2 or not weight.is_contiguous() or weight.dtype not in (torch.half, torch.bfloat16, torch.float)
++    ):
++        return "requires a plain host-resident half / bfloat16 / float32 embedding with float32 output"
++    return emb
++
++
++class Staged:
++    """One round staged on the device: builder mode, position base, the verify's input rows, readback event."""
++    __slots__ = ("mode", "base", "x", "ids", "checked", "fault")
++
++    def __init__(self, mode: int, base: int, x: torch.Tensor, ids: torch.Tensor, checked: torch.cuda.Event,
++                 fault: bool):
++        self.mode = mode
++        self.base = base
++        self.x = x
++        self.ids = ids
++        self.checked = checked
++        self.fault = fault
++
++
++class TreePipe:
++
++    def __init__(self, emb: Embedding, tree_out: torch.Tensor, tree_dev: torch.Tensor, fault: int):
++        weight = emb.embedding.weight.data
++        rc = int(torch.cuda.cudart().cudaHostRegister(
++            weight.data_ptr(), weight.numel() * weight.element_size(), _HOST_REGISTER_FLAGS))
++        if rc not in (0, _ALREADY_REGISTERED):
++            raise RuntimeError(f"Tree pipe: cudaHostRegister of the target embedding failed ({rc})")
++        self.emb = emb
++        self.table = weight
++        self.hidden = emb.hidden_size
++        self.tree_out = tree_out
++        self.tree_dev = tree_dev
++        self.tree_pos = tree_dev[tree_round.DESC_BYTES:].view(torch.int32)
++        dev = tree_out.device
++        rows = tree_round.ROWS
++        # The row tokens of the record as the verify's (1, 8) input ids (shape only: forward reads the rows)
++        self.ids = tree_out[0, :8 * rows].view(torch.long).view(1, rows)
++        self.rows = torch.empty((rows, self.hidden), dtype = torch.float, device = dev)
++        self.dev_pinned = torch.zeros((tree_round.DEV_BYTES,), dtype = torch.uint8, pin_memory = True)
++        self.rows_pinned = torch.zeros((rows, self.hidden), dtype = torch.float, pin_memory = True)
++        self.stream = torch.cuda.Stream(dev)
++        self.fault = fault
++        self.layers = {}
++        self.staged_rounds = 0
++        self.recomputed_rounds = 0
++
++
++    def stage(self, mode: int, base: int) -> Staged:
++        """Launch the device stage of this round on the current stream (after the builder) and its readback."""
++        if not (0 <= base and base + 255 < (1 << 31)):
++            raise RuntimeError(f"Tree pipe: position base {base} out of range")
++        x = torch.empty((1, tree_round.ROWS, self.hidden), dtype = torch.float, device = self.tree_out.device)
++        ext.tree_verify_stage(self.tree_out, base, self.table, self.tree_dev, x.view(tree_round.ROWS, self.hidden),
++                              self.rows)
++        self.staged_rounds += 1
++        fault = self.fault > 0 and self.staged_rounds % self.fault == 0
++        if fault:
++            self.tree_pos.add_(1)
++        main = torch.cuda.current_stream(x.device)
++        staged = torch.cuda.Event()
++        staged.record(main)
++        self.stream.wait_event(staged)
++        with torch.cuda.stream(self.stream):
++            self.dev_pinned.copy_(self.tree_dev, non_blocking = True)
++            self.rows_pinned.copy_(self.rows, non_blocking = True)
++            checked = torch.cuda.Event()
++            checked.record(self.stream)
++        return Staged(mode, base, x, self.ids, checked, fault)
++
++
++    def same(self, staged: Staged, rnd: tree_round.TreeRound) -> bool:
++        """
++        Whether the verify consumed exactly the sequential round's inputs for the checked record rnd: the
++        uploaded bytes tree_round.verify_bytes(desc, depth, base) and the host embedding of the row tokens,
++        bit for bit. The caller has synchronized on staged.checked.
++        """
++        expect = tree_round.verify_bytes(rnd.desc, rnd.depth, staged.base)
++        if self.dev_pinned.numpy().tobytes() != expect:
++            return False
++        rows = self.emb.forward(torch.tensor([rnd.tokens], dtype = torch.long), {})
++        if rows.dtype != torch.float or tuple(rows.shape) != (1, tree_round.ROWS, self.hidden):
++            raise RuntimeError("Tree pipe: the host embedding returned an unexpected tensor")
++        return torch.equal(rows.view(tree_round.ROWS, self.hidden).view(torch.int32), self.rows_pinned.view(torch.int32))
++
++
++    def _layers(self, state) -> list:
++        key = id(state.cache)
++        layers = self.layers.get(key)
++        if layers is None:
++            layers = list(state.cache.get_all_recurrent_layers().values())
++            self.layers[key] = layers
++        return layers
++
++
++    def snapshot(self, state) -> tuple:
++        """The host state a verify forward changes for the GDN state `state` (see discard)."""
++        layers = self._layers(state)
++        slot = state.slot
++        if any(slot in layer.pending for layer in layers):
++            raise RuntimeError("Tree pipe: a pending GDN verify precedes the staged round")
++        return state, state.position, state.last_history, [layer for layer in layers if slot in layer.flushed]
++
++
++    def discard(self, snap: tuple):
++        """
++        Undo the speculative verify forward's host state: no layer holds its verify as pending (nothing is
++        replayed: recurrent row 0 still holds the committed state, the conv windows the committed columns),
++        the flushed set and the state's position and history are as before. Its K/V rows past the committed
++        position and its per-layer statics are scratch that the next forward overwrites.
++        """
++        state, position, last_history, flushed = snap
++        for layer in self._layers(state):
++            layer.pending.pop(state.slot, None)
++        for layer in flushed:
++            layer.flushed.add(state.slot)
++        state.position = position
++        state.last_history = last_history
++        self.recomputed_rounds += 1
+--- a/modules/embedding.py
++++ b/modules/embedding.py
+@@ -68,6 +68,13 @@ class Embedding(Module):
+     @override
+     def weights_numel(self):
+         return self._numel
++
++    @override
++    def prepare_for_device(self, x: torch.Tensor, params: dict) -> torch.Tensor:
++        # ext 9601 tree pipe: the device row ids stay where they are, forward() returns the staged rows
++        if params.get("embedded") is not None:
++            return x
++        return super().prepare_for_device(x, params)
+         
+     @override
+     def forward(
+@@ -85,6 +92,18 @@ class Embedding(Module):
+         input_ids = x
+         out_dtype = out_dtype or self.out_dtype or x.dtype
+ 
++        # ext 9601 tree pipe: the generator's tree_verify_stage gathered these rows on the device from this
++        # module's mapped table, widened to float32: exactly the host path below for x (plain embedding rows,
++        # no indexed embeddings, normalization or multiplier); x is then the (bsz, seq) device row ids
++        embedded = params.get("embedded")
++        if embedded is not None:
++            if (
++                indexed_emb or self.normalize or self.multiplier != 1.0 or out_dtype != torch.float or
++                embedded.dtype != torch.float or tuple(embedded.shape) != (*x.shape, self.hidden_size)
++            ):
++                raise RuntimeError("Embedding: device-staged rows need a plain float32 embedding of the round's ids")
++            return embedded
++
+         # Indexed embedding masks
+         if indexed_emb:
+             standard_mask = input_ids < FIRST_MM_EMBEDDING_INDEX
