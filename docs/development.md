@@ -53,64 +53,97 @@ The CPU development environment does not install serving torch, EXL3 or
 transformers. Missing imports remain explicit environment blockers, not ignored
 rules. Validate authored runtime modules in their separately pinned image before
 claiming complete type coverage. Bend sources are checked with the pinned
-`.#bend` toolchain (see [AGENTS.md](../AGENTS.md)), not the Python gates.
+`.#bend` toolchain (see [README, Prove](../README.md#prove)), not the Python gates;
+`nix run .#bend-verdict -- PROOF.bend --verdict` rechecks them with Bend's
+Lean-proven kernel (same Bend, plus the pinned Lean 4.34.0 from `nix/lean4.nix`).
 
 Upstream evaluation environments use their separate setup and locked
 dependencies under `eval/`. Keep full check logs private and group authored
 findings by file when assigning cleanup. Do not claim passing quality gates
 while diagnostics remain.
 
-## EXL3 cutover verification status
+## Source links (`bend/*_diff.py`)
 
-The original serving-1 cutover passed runtime CPU protocol proof and a real
-authenticated EXL3 named-tool addition/continuation, buffered tool SSE,
-authentication, model identity, schema-error handling and post-promotion health.
-Its evidence remains intact. The current serving-2 image adds top-level
-`reasoning_effort` compatibility without changing nested OMP controls or transport.
-See [deployment evidence](docker.md#current-persistent-live-deployment) for exact
-identities and private receipt locations.
+A source link compares a Bend model with the engine source text. It is
+evidence for `H_conform`, not a proof. Run every link from the repository root
+inside the dev shell. The shell supplies `bend` 2.0.35, `c++` (clang 19),
+`patch` and Python 3.13. Each link resolves `bend` from `PATH` and stops if
+`bend version` is not exactly `bend 2.0.35` (`bend/source_link.py`). If the
+host file `/tmp/cpu-lock.sh` exists, is yours and only you can write it, the
+links run their compilers and `bend` through it. If it does not exist, they run
+them directly.
 
-Serving-2's guarded build passed (1.43 s), as did CPU reasoning (0.78 s),
-protocol (0.81 s), all 30 actual gateway schemas (0.71 s) and admission of the
-entire actual Telegram gateway request, including full history (0.70 s, 30 tools).
-That CPU admission did not generate or print private text. Real client proofs
-against the new image:
+### 1. Make the engine trees
 
-- Hermes gateway 0.21.3: the original HTTP 400 was fixed; terminal execution
-  `139 + 207` and continuation returned `346` (11.43 s), with the database
-  tool-call/result ID pair verified.
-- Interactive Hermes 0.21.4: terminal execution `137 + 205` and continuation
-  returned `342` (32.31 s).
-- OMP 18.2.11: its normal native tool catalog read `/etc/os-release` and returned
-  NixOS (30.09 s).
-- Telegram `getMe` and `getWebhookInfo` passed for `@gdrb_gatewaybot`, with no
-  webhook and zero pending updates. `getChat` verified the exact existing
-  allowlisted private recipient. The native Hermes sender delivered exactly
-  one approved check (2.88 s), with its message ID confirmed. The gateway status
-  socket reported PID 3655, Telegram connected and no attention required.
-  No second poller was started or token disclosed.
-  **A fresh inbound user-to-bot exchange remains unexercised**; outbound delivery
-  is not a full ingress roundtrip.
+```console
+nix develop --offline --no-write-lock-file -c python3 -I -B bend/engine_trees.py OUT
+nix develop --offline --no-write-lock-file -c python3 -I -B bend/engine_trees.py OUT3005 --through 3005-attn-row-invariant-split.patch
+```
 
-These elapsed times are smoke observations, not benchmarks. Client selection,
-host-only routing and the unactivated Hermes overlay are documented under
-[host client routing](docker.md#host-client-routing).
+- Input: the ExLlamaV3 `355c6ee` commit tarball. `docker/base/sources.lock`
+  (`archives.exllamav3`) pins its URL and SHA-256. The script downloads it over
+  HTTPS. With `--archive FILE` it reads a local copy instead, for example the
+  file that `docker/fetch-base.sh` stores under `build/base-inputs/`. The
+  SHA-256 must agree before the script reads the archive.
+- `OUT/stock`: the stock `exllamav3` package directory. The script checks the
+  extension tree against `patches/exl3-ext/exl3-ext.json`.
+- `OUT/patched`: `OUT/stock` plus `patches/exl3/series`, then
+  `patches/exl3-ext/series`, with every patch hash, pre-image and post-image
+  checked (the same checks as the image build).
+- `--through PATCH`: stop after that `patches/exl3-ext` patch. Some links
+  document an earlier kernel. For a partial series the script checks the patch
+  hashes and the pre-images only; the manifests have no partial post-images.
+- On any error the script stops and keeps no output.
 
-These proofs do not establish full-context capacity, model quality, throughput
-or genuine incremental streaming; SSE remains buffered until generation finishes.
-`py_compile` and pinned Ruff format checks passed. These do not make the
-development gates clean: **Ruff ALL style findings remain**, including
-same-policy findings on new strings/complexity. The current host ty check reports
-12 unresolved imports for container-only dependencies (`jinja2`, `jsonschema`,
-`referencing`, `torch`, `exllamav3`), not a clean typecheck. Runtime ty was not
-rerun; its previously reported **upstream torch bare `inference_mode` typing
-issue** remains a historical known limitation. No suppression was added. Report
-remaining diagnostics alongside runtime proof, not as all checks passed.
+### 2. Run the links
 
-The Nix deployment and standalone launcher builds passed. The example
-`serving-units` build remains unverified: uncached systemd dependencies required
-source downloads, which timed out. This did not affect the running Docker service.
+Prefix each command with
+`nix develop --offline --no-write-lock-file -c python3 -I -B`. `OUTn` is a tree
+made with `--through` the patch whose number is `n`.
 
-The host-owned Hermes overlay passed `nix-instantiate --parse`, not OS activation.
-Its `nixfmt --check` failed on the mixed-format existing file; unrelated content
-was not reformatted.
+| Link | Arguments | Notes |
+|---|---|---|
+| `attn_pre_diff.py`, `attn_stride_diff.py`, `pattn_sched_diff.py`, `gdn_ba_ksplit_diff.py`, `mlp_m16_defer_diff.py`, `gemm_m16_wpart_diff.py`, `m16_discard_diff.py` | `OUT/patched` | |
+| `draft_mask_diff.py` | `--engine OUT/patched` | |
+| `m16_diet_diff.py`, `m16_diet2_diff.py` | `--tree OUT/patched` | The 2106 / 2107 patch defaults to the tracked file. |
+| `m16_wsched_diff.py` | `--tree OUT/patched` | Reference: `bend/gen/m16_wsched_ref.py`. |
+| `hgemm_wide_diff.py` | `OUT/patched/exllamav3_ext` | |
+| `gdn_replay_diff.py` | `OUT/patched OUT/patched/cache/recurrent_util.py` | |
+| `attn_chunk_diff.py` | `OUT3003/patched` | 3003 kernel; 3006 replaces it. |
+| `attn_rowinv_diff.py` | `OUT3005/patched/modules/attention_fn/triton_paged.py` | The file must have the pinned 3005 hash. |
+| `gdn_replay_gather_diff.py` | `OUT5108/patched` | 5108 kernel; 5109 changes one quoted line. |
+| `norm_fuse_diff.py` | `OUT/stock` | The link applies 7001 itself. |
+| `mlp_m16_sched_diff.py`, `tail_m16_sched_diff.py` | none | Inputs are tracked files. |
+| `draft_head_idmap_diff.py` | `OUT/patched` | Needs numpy, see below. |
+
+`draft_head_idmap_diff.py` runs the engine's Python with a numpy stand-in for
+torch. The dev shell has no numpy. Use the numpy of the pinned nixpkgs
+(`flake.lock`). If it is not in the local store, Nix fetches it once from the
+signed binary cache:
+
+```console
+nix develop --offline --no-write-lock-file -c nix shell --impure --expr 'let p = (builtins.getFlake "git+file://${toString ./.}").inputs.nixpkgs.legacyPackages.x86_64-linux; in p.python313.withPackages (ps: [ ps.numpy ])' -c python3 -I -B bend/draft_head_idmap_diff.py OUT/patched
+```
+
+### Inputs outside the repository
+
+- `draft_head_idmap_diff.py --order-json FILE`: the full block order from a
+  corpus run. The repository cannot make it.
+
+### Links that do not pass today
+
+- `attn_split_diff.py` quotes an `av_split_len` revision of 3003 that no
+  tracked patch contains. No tree passes. Its model `bend/attn_split.bend`
+  documents that earlier, round-relative split. `bend/attn_chunk.bend` models
+  the tracked 3003 and `bend/attn_stride.bend` the 3006 kernel.
+
+`gemm_m16_group_diff.py` takes the tracked 2102 patch:
+`python3 -I -B bend/gemm_m16_group_diff.py patches/exl3-ext/2102-proj-m16-grouped-v2-on3003-5101.patch`.
+
+### Generators (`bend/gen/`)
+
+| Generator | Output | Check |
+|---|---|---|
+| `gen_table.py --out-dir D` | `exl3_tree_table.bend`, `EXL3_TREE_ACCEPT.bend`, `EXL3_TREE_ACCEPT_SPEC.bend` | `cmp D/<file> bend/<file>` |
+| `roofline_impl.py` (input `roofline_inventory.json`, made by `roofline_inventory.py` from the model files) | `roofline.bend` on stdout | `cmp` with `bend/roofline.bend` |
+| `mlp_m16_sched_ref.py`, `m16_wsched_ref.py` (`wpart.py`) | independent references | used by the links above |
