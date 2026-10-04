@@ -161,3 +161,65 @@ import ./bend/spec_inv_tree_laws.bend as SpecInvTreeLaws
 # The host TreeDesc reference (exl3_tree_accept_spec.derive) and the tree-attention reference
 # (attn_tree_spec.desc) agree on the fields both read, on every legal parent array.
 import ./bend/tree_desc_agree_laws.bend as TreeDescAgreeLaws
+# ext 3020 8-warp prefill attention (exllamav3_ext/pattn8_kernel.cuh; bend/pattn8_sched.bend against 3010's model
+# bend/pattn_sched.bend): warp w < 8 of pair < 3 runs 3010 warp 2 pair + w / 4 of query block 4 qc + w % 4 (forward,
+# injective and onto; every 3010 block lies in a launched 64-row chunk); that warp has 3010's q head, positions, row
+# bounds and mask state, computes in exactly 3010's tile iterations 0 .. ntiles - 1 in loop order (the CTA loop runs at
+# least that many), keeps the same keys per tile (so every causal (row, key) pair is attended exactly once, in tile
+# p / 32); warps past q_len compute and store nothing; the q prologue fills each warp's own rows; K / V tile chunks are
+# issued exactly once for 256 (3020) and 192 (3010) threads. The per-warp arithmetic below the warp map is 3010's text
+# (bend/pattn8_sched_diff.py), so outputs are bit-identical to 3010. The same link checks that ext 3021c's int8-QK kernel
+# (pattn8i_kernel.cuh) runs this schedule (block / warp / tile / mask / row-bound expressions, grid, threads).
+import ./bend/pattn8_sched_laws.bend as Pattn8SchedLaws
+# ext 5112 SiLU-gate product in the prefill up-projection GEMM epilogue (exllamav3_ext/hgemm_act.cu; bend/act_fuse.bend
+# against stock hgemm_recon + silu_mul, bend/act_fuse_spec.bend): every fused store (row, 2 c) is act_mul_kernel_h's half2
+# index row n + c (N = 2 n, pair-aligned columns, a bijection onto the stock indices) and stores the same half2 operation
+# term (same operands, same order, same rounding points) for both act_limit branches; the stock launch covers each index
+# once; the fused route runs only with both switches on, sm86, K 5120 x N 17408, M >= 1024, where stock hgemm_recon takes
+# the 3011 wide kernel (route and worthwhile() hold). K loop and store map are 3011's text (bend/act_fuse_diff.py).
+import ./bend/act_fuse_laws.bend as ActFuseLaws
+# ext 5111 GDN prefill conv on the fp32 qkv (modules/gated_delta_net_fn/conv1d.py; bend/gdn_conv_qkv.bend against the
+# stock transpose / bf16 cast / split / contiguous path, bend/gdn_conv_qkv_spec.bend): each input read is the qkv element
+# the stock transposed copy held at the stock kernel's address; each output (s, d) lands at its q / k / v view element
+# (s, j) = view base + s width + j, the three views tile the buffer back to back and each view's layout is a bijection,
+# so the store map is a bijection onto the buffer. The conv arithmetic is the stock kernels' text (bend/gdn_conv_qkv_diff.py).
+import ./bend/gdn_conv_qkv_laws.bend as GdnConvQkvLaws
+# ext 5110g merged 4096-row prefill pieces (generator/job.py; bend/prefill_merge.bend against the 2048-row step,
+# bend/prefill_merge_spec.bend; text-only recurrent model, no prompt-cache page hit in the pieces): a merged step is
+# exactly two 2048-row steps (ends k + mc and k + 2 mc, no last-page cut), any other step is the 2048-row step, a merge
+# needs last_tok <= M4096_MAX_PROMPT (G; 131072 in 5110g, bend/prefill_merge_diff.py on a tree through 9502) and above
+# it the whole schedule is the 2048-row one, the merged forward's rows are the two pieces' rows in order; the 3010
+# prefill attention row is chunk-independent and the 3011 wide-GEMM route is the same at M 2048 and 4096. NOT covered
+# (checkpoint_positions shows it): recurrent checkpoints are stashed only at visited positions, and a merged run from a
+# start = mc (mod 2 mc) skips pp-interval checkpoints the 2048 schedule takes. 5110h's guard: prefill_membound below.
+import ./bend/prefill_merge_laws.bend as PrefillMergeLaws
+# ext 5110h merged-prefill memory bound (generator/job.py m4096_stage_pages / M4096_MAX_STAGE_PAGES; bend/prefill_membound.bend,
+# reference bend/prefill_merge_spec.bend): a merged step is exactly two 2048-row steps, otherwise the 2048-row step; a merge needs
+# last_tok <= G and stage pages <= the bound; past either bound the whole schedule is the 2048-row one, within it 5110h is 5110g;
+# power-of-two staging: 1024 pages merge-eligible, 1025 -> 2048 pages never merged.
+import ./bend/prefill_membound_laws.bend as PrefillMemboundLaws
+# ext 9503f / 9503b quantized-cache prefill staging scratch (triton_paged.py qc_staging_pages, job.py M4096_MAX_STAGE_PAGES = 1088;
+# bend/qc_staging.bend, reference bend/qc_staging_spec.bend): the scratch covers the block-table span (pattn_stage_int8k's check), never
+# exceeds the old power of two, < span + 64, unchanged for 1..64 pages, monotone; equals smallest-power-of-two / smallest-multiple-of-64
+# by search, env switch included (n >= 1); 1025 pages -> 1088 (switch 0: 2048, unmerged); every table <= 1025 pages passes 1088, so
+# the default decision is 5110g's with G = 262143; n = 0 discrepancy pinned.
+import ./bend/qc_staging_laws.bend as QcStagingLaws
+# ext 9502 EXL3_PREFILL_NOSYNC (cache/recurrent.py settle / put(defer) / readers, Generator.iterate order, pinned prefill
+# uploads; bend/prefill_nosync.bend vs the happens-before observer of bend/prefill_nosync_spec.bend), for every sequence of
+# iterates: each chunk upload precedes its forward; each checkpoint copy reads the state of its put (enqueued before the
+# next forward); a deferred copy of round r is waited before any copy of a later round and before round r + 1's checkpoint
+# stash loop, outside readers only in round r + 1 after its prefill forward or in its recurrent_checkpoint; no reader reads
+# with a copy outstanding (persist's _require holds); every copy waited exactly once, the outstanding ones are the pending
+# list; the off switch gives the pre-9502 blocking trace; the pending-round invariant holds initially and is kept by every
+# operation (begin_round from a settled round).
+import ./bend/prefill_nosync_laws.bend as PrefillNosyncLaws
+# ext 3021c int8 QK^T integer core (exllamav3_ext/pattn8i_kernel.cuh; bend/pattn8i_int.bend against the exact integer reference
+# bend/pattn8i_int_spec.bend): the 3-bit K field gives an odd code in -7..7 (a bijection from 0..7); the Q clamp keeps |q8| <= 127
+# (x itself when |x| <= 127); every adjacent-integer rounding of code * f with 0 <= f <= 18 has |kq| <= 126 (hypothesis f <= 18 from
+# the fp32 steps, checked over all fp16 scale pairs by bend/pattn8i_int_diff.py), kq = 18 code on the key's largest-scale group;
+# the IMMA issue pattern feeds each accumulator 8 times; each 32-term partial |sum| <= 512064 < 2^24 and every prefix of the
+# 8-IMMA int32 chain equals the exact 256-dim integer dot product (int32 wrap is the identity below 2^31; 8 * 512064 < 2^22 < 2^31);
+# i2f_exact is exact on [-2^22, 2^22), its precondition failing at 2^22. FINDING (proven): K is rounded (code 7, s / smax = 3 / 5:
+# 75.6, no integer kq equals it) and the partial bound is 512064, not the per-group design's 32 * 127 * 7 = 28448; the rounding
+# points of a score are Q rotation, Q quantisation, K requantisation, rs, skk, rs * sk and the final multiply, the integer core none.
+import ./bend/pattn8i_int_laws.bend as Pattn8iIntLaws

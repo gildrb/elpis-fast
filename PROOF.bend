@@ -43,3 +43,11 @@ import ./bend/exl3_tree_derive_proof.bend as Exl3TreeDeriveProof
 import ./bend/exl3_tree_path_proof.bend as Exl3TreePathProof
 import ./bend/spec_inv_tree_proof.bend as SpecInvTreeProof
 import ./bend/tree_desc_agree_proof.bend as TreeDescAgreeProof
+import ./bend/pattn8_sched_proof.bend as Pattn8SchedProof
+import ./bend/act_fuse_proof.bend as ActFuseProof
+import ./bend/gdn_conv_qkv_proof.bend as GdnConvQkvProof
+import ./bend/prefill_merge_proof.bend as PrefillMergeProof
+import ./bend/prefill_membound_proof.bend as PrefillMemboundProof
+import ./bend/qc_staging_proof.bend as QcStagingProof
+import ./bend/prefill_nosync_proof.bend as PrefillNosyncProof
+import ./bend/pattn8i_int_proof.bend as Pattn8iIntProof

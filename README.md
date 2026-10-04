@@ -97,8 +97,9 @@ Figures of other projects come from their repositories. elpis-fast did not run t
 | The draft never changes the output, if each verify row depends only on its prefix (`~rinv`) | Bend: `spec_inv`, `spec_inv_tree` over chain and 8-row tree; `~rinv` is a hypothesis | proven under `~rinv` |
 | Evidence for `~rinv` | Bend: `attn_rowinv_laws`, `gdn_rounds_laws` per kernel; the link to `~rinv` is not proven | per kernel |
 | Each round makes progress; generation ends | Bend: round model `exl3_round`, without `~rinv` | proven |
-| Kernel schedules: each output computed once, in a fixed order | Bend: `gemm_m16_*`, `mlp_m16_*`, `tail_m16_sched`, `m16_wsched*`, `m16_diet*`, `attn_split` / `chunk` / `stride` / `pre` / `tree` / `bounds`, `gdn_*`, `pattn_sched`, `hgemm_wide`, `norm_fuse`, `draft_head_*`, `draft_mask` | proven |
-| Full contract | `bend PROOF.bend --verdict`: 39 law modules, 41 proof modules | ALL PROOFS CHECK |
+| Kernel schedules: each output computed once, in a fixed order | Bend: `gemm_m16_*`, `mlp_m16_*`, `tail_m16_sched`, `m16_wsched*`, `m16_diet*`, `attn_split` / `chunk` / `stride` / `pre` / `tree` / `bounds`, `gdn_*`, `pattn_sched`, `pattn8_sched`, `hgemm_wide`, `norm_fuse`, `draft_head_*`, `draft_mask` | proven |
+| Prefill patches: 3020 = 3010 per warp (and 3021c's schedule), 5111 / 5112 index maps and terms, 5110g/h merge = two 2048-row steps under its guard, 9502 copies settled before use, 3021c int32 core exact, 9503f staging covers the span | Bend: `pattn8_sched`, `gdn_conv_qkv`, `act_fuse`, `prefill_merge`, `prefill_membound`, `prefill_nosync`, `pattn8i_int`, `qc_staging` | proven |
+| Full contract | `bend PROOF.bend`: 47 law modules, 49 proof modules; `--verdict`: the whole contract at 39 / 41 modules, each of the 8 prefill modules on its own | ALL PROOFS CHECK |
 | The draft never changes the output, on the GPU | 15 prompts × normal / capped / all-rejected draft (`cs10`) | 45/45 |
 | Kernel changes | GDN state hashes, 1-8 steps (5108); 64 layers × rows 1-8 × 30 graph replays (2113); all 5,040 tree shapes vs the chain kernel (3012) | bit-exact |
 | Exact prefill patches 3020, 5111, 5112, 5110g, 9502, 5110h | prefill suite, 9 rows, vs the previous image | byte-identical |
@@ -115,7 +116,7 @@ Figures of other projects come from their repositories. elpis-fast did not run t
 |---|---|
 | DFlash2 draft: one pass proposes 7 tokens | 1.00 → 3.39 tokens per round at 1K; round time unchanged (≈34 ms, 250 W) |
 | 8-row token tree: 7 nodes, best first; commit the longest matching path + 1 | 3.39 → 3.89 tokens per round at 1K; lane 111.85 → 122.33 tok/s (250 W) |
-| int8 Q·Kᵀ in prefill attention (3021c): the 3-bit K codes are exact int8; only Q is quantized, per row | kernel ×0.78-0.79 of 3020; 262K TTFT 362.5 → 322.0 s |
+| int8 Q·Kᵀ in prefill attention (3021c): Q per row and K per key requantized to int8; exact int32 accumulation and conversion | kernel ×0.78-0.79 of 3020; 262K TTFT 362.5 → 322.0 s |
 | Prefill: 8-warp attention (3020), fused GDN conv (5111), fused SiLU · up (5112), 4096-row merge (5110g, 5110h), no host syncs (9502) | geomean 977.9 → 1,196.6 tok/s (#70 → `pfast2`) |
 | 49 engine patches: 5 [`patches/exl3`](patches/exl3) + 44 [`patches/exl3-ext`](patches/exl3-ext) | per patch: [docs/benchmarks.md](docs/benchmarks.md) |
 | 350 W cap, quiet fans (≤ 80 % to 84 °C) | lane +32.3 % tok/s vs 250 W at equal tok/J (0.497 vs 0.495) |
