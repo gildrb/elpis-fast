@@ -21,10 +21,11 @@ Runs the Bend emitter bend/M16_DIET2_TABLE.bend and, independently, evaluates th
      inst lines;
   4. the hoisted L2 policy is created with the same createpolicy instruction cp_async_stream uses per
      call, and cp_async_stream_pol issues the same cp.async.
-With --patch PATCH (default: the 2107 patch if present) it prints the patch sha256 and requires PATCH_SHA256.
-Exit status 0 iff every comparison is IDENTICAL.
+With --patch PATCH (default: the tracked patches/exl3-ext/2107 patch) it prints the patch sha256 and requires
+PATCH_SHA256. Exit status 0 iff every comparison is IDENTICAL.
 
-Usage: python3 -B bend/m16_diet2_diff.py [--tree TREE] [--patch PATCH]
+Usage: python3 -B bend/m16_diet2_diff.py --tree TREE [--patch PATCH]
+  TREE: OUT/patched of bend/engine_trees.py (full series: the checks need the FO parameter of ext 3023).
 """
 
 from __future__ import annotations
@@ -36,11 +37,13 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/M16_DIET2_TABLE.bend"
-DEFAULT_TREE = "/tmp/kernel-work/M16gEff/whatif/c9pin.tree"
-DEFAULT_PATCH = "/tmp/kernel-work/M16gEff/whatif/2107-m16-decode-diet-on2106.patch"
+DEFAULT_PATCH = REPO / "patches/exl3-ext/2107-m16-decode-diet-on2106.patch"
 PATCH_SHA256 = "0584196dab3f0cdd2e255d383dfd23c6a76c10ec7c3c151fabcbd9418c1b2ae9"
 KERNELS = ("exl3_gemm_m16g_kernel.cuh", "exl3_mlp_m16_kernel.cuh", "exl3_tail_m16_kernel.cuh")
 LAUNCHERS = ("exl3_gemm_m16g.cu", "exl3_mlp_m16.cu", "exl3_tail_m16.cu")
@@ -119,9 +122,10 @@ def run_extract(src: str, what: str, a: int, b: int) -> tuple[dict[str, int], li
 
 
 def bend_table() -> list[str]:
-    proc = subprocess.run([BEND, TABLE], cwd=REPO, capture_output=True, text=True, timeout=1800, check=False)
+    bend = source_link.bend()
+    proc = subprocess.run([bend, TABLE], cwd=REPO, capture_output=True, text=True, timeout=1800, check=False)
     if proc.returncode != 0:
-        fail(f"{BEND} {TABLE} exited {proc.returncode}: {proc.stderr.strip()[:400]}")
+        fail(f"{bend} {TABLE} exited {proc.returncode}: {proc.stderr.strip()[:400]}")
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
@@ -145,8 +149,11 @@ def c_set(mode: int, x: int | None) -> int:
 
 
 def main(argv: list[str]) -> int:
-    tree = Path(take_opt(argv, "--tree") or DEFAULT_TREE)
-    patch = take_opt(argv, "--patch") or (DEFAULT_PATCH if Path(DEFAULT_PATCH).exists() else None)
+    tree_opt = take_opt(argv, "--tree")
+    if tree_opt is None:
+        fail("usage: m16_diet2_diff.py --tree TREE [--patch PATCH]")
+    tree = Path(tree_opt)
+    patch = take_opt(argv, "--patch") or str(DEFAULT_PATCH)
     if patch:
         digest = hashlib.sha256(Path(patch).read_bytes()).hexdigest()
         print(f"patch {patch} sha256 {digest}")

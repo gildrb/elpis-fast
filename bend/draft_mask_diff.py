@@ -17,6 +17,7 @@ under the served split geometry (bsz 1, 8 kv heads, 2 h-blocks, grid_y 10, 82 SM
 others. `--mutate NAME` perturbs one engine line and must FAIL.
 
 Usage: python3 -I -B draft_mask_diff.py --engine <tree> [--table <table.txt>] [--mutate NAME]
+  --engine <tree>: OUT/patched of bend/engine_trees.py (the full series).
 """
 from __future__ import annotations
 
@@ -32,12 +33,13 @@ from pathlib import Path
 from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
-LOCK = ["flock", "-s", "/tmp/elpis-gpu.lock", "nice", "-n", "19"]
-PINS = {  # post-images: 0005 scratch manifest (dflash.py), repo exl3-ext.json (the others)
-    "architecture/dflash.py": "fa07b1b8263b3f725f01f7ba5f27438702ac3ed5993e8839d1dafe44b568b8f4",
-    "architecture/dflash2.py": "16a2982724b070b7328a652e4127fda0da3e3836228234bc864f6190b8657fa2",
-    "modules/attention_fn/triton_paged.py": "12896d430c94639ec4157a967f1635cc4a0dcc2198294d6349a9a2749ed9623e",
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+PINS = {  # post-images of the full patched tree (patches/exl3/series + patches/exl3-ext/series)
+    "architecture/dflash.py": "1440f55c4cbf7e1367ce4bc41cb633c673d44e137b966ee5cf2ce320bd062d48",
+    "architecture/dflash2.py": "3eb3fda82aa99652eed42998b0d79a6c2add74d094bf453650b29c74e90dbd69",
+    "modules/attention_fn/triton_paged.py": "792a461592bfdadbd3b0f903b9098951e0ce5964c9e860d354e6d5906b331290",
 }
 KERNEL_START = [
     "    total_k_len = tl.load(cache_seqlens + batch) + kv_append_len",
@@ -177,7 +179,7 @@ def bend_table(path: str | None) -> str:
         return Path(path).read_text()
     with tempfile.TemporaryDirectory() as d:
         exe = Path(d) / "table"
-        r = subprocess.run(LOCK + [BEND, str(HERE / "DRAFT_MASK_TABLE.bend"), "-o", str(exe)],
+        r = subprocess.run(source_link.locked([source_link.bend(), str(HERE / "DRAFT_MASK_TABLE.bend"), "-o", str(exe)]),
                            capture_output=True, text=True, cwd=HERE)
         if r.returncode:
             fail("Bend table compile failed:\n" + r.stdout[-2000:] + r.stderr[-2000:])

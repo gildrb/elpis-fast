@@ -10,8 +10,9 @@ kept = set(kb), keep_cols, the id_map statements, the topk slicing statements), 
 observe_anchor call), generator/job.py = J (begin_job at each job's prefill). Every block is located by its signature
 (exactly once), quoted verbatim with its line range, and every quoted non-blank line of a 9005c block must be a `+`
 line of the pinned 9005c patch (sha256 checked). The parsed constants and the 1024-entry block order must equal the
-Bend model's literals (draft_head_idmap.bend); if the DraftProj full order (block_order_code.json) is present it must
-be a permutation of the 1940 blocks, extend the source table and match the source's pinned full-order sha256.
+Bend model's literals (draft_head_idmap.bend); if --order-json FILE gives the DraftProj full order
+(block_order_code.json) it must be a permutation of the 1940 blocks, extend the source table and match the source's
+pinned full-order sha256.
 
 Reference computations, each on the quoted source itself:
   - S is executed as a module (it imports only os): kept_blocks(248320) for N = 896 and 1024
@@ -29,7 +30,14 @@ The compiled Bend table (DRAFT_HEAD_IDMAP_TABLE.bend) must equal the reference o
 replay must cover a trigger, a reset during a hold, a completed hold, out-of-range anchors and the static mode.
 Differential evidence on finite instances, not a proof; the proof is draft_head_idmap_proof.bend.
 
-Usage: python3 bend/draft_head_idmap_diff.py [--mutate NAME | --all-mutations] [TREE]
+Usage: python3 bend/draft_head_idmap_diff.py [--order-json FILE] [--mutate NAME | --all-mutations] TREE
+  TREE: OUT/patched of bend/engine_trees.py.
+  FILE: block_order_code.json, written by DraftProj's select_order.py from host corpora. It is not in the repo and
+  the repo cannot make it again. Without it, the full-order check does not run (the output tells this).
+Needs numpy. The dev shell does not provide numpy. From the repo root, run:
+  nix develop --offline --no-write-lock-file -c nix shell --impure --expr 'let p = (builtins.getFlake
+  "git+file://${toString ./.}").inputs.nixpkgs.legacyPackages.x86_64-linux; in p.python313.withPackages
+  (ps: [ ps.numpy ])' -c python3 -I -B bend/draft_head_idmap_diff.py [--order-json FILE] TREE
 """
 
 from __future__ import annotations
@@ -47,22 +55,23 @@ import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    raise SystemExit("draft_head_idmap_diff: FAIL numpy is not importable. Run the driver with the "
+                     "python313.withPackages (ps: [ ps.numpy ]) command in the module docstring.") from None
 
 HERE = Path(__file__).resolve().parent
-REPO = Path("/home/gilrodrigues/Repos/elpis")
-TREE_DEFAULT = Path("/tmp/kernel-work/DraftProj/q4p/c_elpis")
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 PATCH_NAME = "9005c-elpis-draft-q4-head-pruned-n896.patch"
-PATCH_CANDIDATES = [REPO / "patches/exl3-ext" / PATCH_NAME,
-                    Path("/tmp/kernel-work/DraftProj/q4p/pins_elpis/patches/exl3-ext") / PATCH_NAME]
+PATCH_PATH = REPO / "patches/exl3-ext" / PATCH_NAME
 PATCH_SHA256 = "e7a2952ff6485c74d8b443fdeb751b9961f2c834b60b0d2940af6e77b7ce4db9"
-ORDER_JSON = Path("/tmp/kernel-work/DraftProj/q4p/block_order_code.json")
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "DRAFT_HEAD_IDMAP_TABLE.bend"
 IMPL = "draft_head_idmap.bend"
 PROOF = "draft_head_idmap_proof.bend"
-LOCK = ["/tmp/cpu-lock.sh"] if Path("/tmp/cpu-lock.sh").exists() else \
-    ["flock", "-s", "/tmp/elpis-gpu.lock", "nice", "-n", "19"]
 
 PATHS = {"S": "modules/arch_specific/dflash2_head_blocks.py", "Q": "modules/arch_specific/dflash2_q4_head.py",
          "D": "exllamav3_ext/dflash2_head.cu", "A": "architecture/dflash2.py", "J": "generator/job.py"}
@@ -498,7 +507,7 @@ def run_law_mutation(name: str) -> tuple[bool, str]:
         if t.count(a) != 1:
             fail(f"law mutation {name} does not apply exactly once")
         (Path(td) / fname).write_text(t.replace(a, b))
-        r = subprocess.run(LOCK + [BEND, PROOF], cwd=td, capture_output=True, text=True)
+        r = subprocess.run(source_link.locked([source_link.bend(), PROOF]), cwd=td, capture_output=True, text=True)
     out = (r.stdout + r.stderr).strip().splitlines()
     loc = next((l.strip() for l in out if l.startswith("Location")), "")
     where = next((l.strip() for l in out if ">|" in l), "")
@@ -530,19 +539,24 @@ def run_all_mutations(tree: str) -> int:
 def main(argv: list[str]) -> None:
     args = argv[1:]
     mutate = None
+    order_json = None
+    if args[:1] == ["--order-json"]:
+        if len(args) < 2:
+            fail(__doc__)
+        order_json, args = Path(args[1]), args[2:]
     if args[:1] == ["--all-mutations"]:
-        sys.exit(run_all_mutations(args[1] if len(args) > 1 else str(TREE_DEFAULT)))
+        if len(args) != 2:
+            fail(__doc__)
+        sys.exit(run_all_mutations(args[1]))
     if args[:1] == ["--mutate"]:
         if len(args) < 2 or args[1] not in MUTATIONS:
             fail(f"--mutate NAME, NAME in {sorted(MUTATIONS)}")
         mutate, args = args[1], args[2:]
-    if len(args) > 1:
+    if len(args) != 1:
         fail(__doc__)
-    tree = Path(args[0] if args else TREE_DEFAULT)
+    tree = Path(args[0])
 
-    patch_path = next((p for p in PATCH_CANDIDATES if p.exists()), None)
-    if patch_path is None:
-        fail(f"patch {PATCH_NAME} not found in {[str(p) for p in PATCH_CANDIDATES]}")
+    patch_path = PATCH_PATH
     patch = patch_path.read_bytes()
     sha = hashlib.sha256(patch).hexdigest()
     print(f"patch {patch_path} sha256 {sha}")
@@ -590,14 +604,14 @@ def main(argv: list[str]) -> None:
         fail(f"{IMPL} idm_order ({len(border)} entries) != source DRAFT_HEAD_BLOCK_ORDER ({len(order)} entries)")
     print(f"Bend model constants {sorted(bconst.items())} and idm_order ({len(border)} entries) equal the source")
     pinned = re.search(r"[0-9a-f]{64}", q["full_order_sha"]).group(0)
-    if ORDER_JSON.exists():
-        full = json.load(open(ORDER_JSON))["order"]
+    if order_json is not None:
+        full = json.load(open(order_json))["order"]
         fsha = hashlib.sha256(json.dumps(full).encode()).hexdigest()
         if sorted(full) != list(range(1940)) or full[:1024] != order or fsha != pinned:
-            fail(f"{ORDER_JSON}: not a permutation of 1940 blocks extending the source table with sha256 {pinned} ({fsha})")
-        print(f"full order {ORDER_JSON}: permutation of the 1940 blocks, prefix = source table, sha256 {fsha} = source pin")
+            fail(f"{order_json}: not a permutation of 1940 blocks extending the source table with sha256 {pinned} ({fsha})")
+        print(f"full order {order_json}: permutation of the 1940 blocks, prefix = source table, sha256 {fsha} = source pin")
     else:
-        print(f"full order {ORDER_JSON} not present: permutation check of the full order not run (source pin {pinned})")
+        print(f"full order not given (--order-json): permutation check of the full order not run (source pin {pinned})")
 
     s_text = text["S"]
     if mutate:
@@ -615,7 +629,8 @@ def main(argv: list[str]) -> None:
     # the Bend table
     with tempfile.TemporaryDirectory() as td:
         exe = Path(td) / "table"
-        r = subprocess.run(LOCK + [BEND, TABLE, "-o", str(exe)], cwd=HERE, capture_output=True, text=True)
+        r = subprocess.run(source_link.locked([source_link.bend(), TABLE, "-o", str(exe)]), cwd=HERE,
+                           capture_output=True, text=True)
         if r.returncode != 0:
             fail(f"bend compile: {r.stdout}{r.stderr}")
         bres = subprocess.run([str(exe)], capture_output=True, text=True, preexec_fn=unlimited_vm)
@@ -664,7 +679,7 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "topk.cpp"
         c.write_text(c_program(q, V, runs))
         exe = Path(td) / "topk"
-        subprocess.run(LOCK + ["c++", "-O2", "-std=c++17", "-Wall", "-o", str(exe), str(c)], check=True)
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-Wall", "-o", str(exe), str(c)]), check=True)
         inp = Path(td) / "maps.txt"
         inp.write_text("".join(cfile))
         cres = subprocess.run([str(exe), str(inp)], capture_output=True, text=True)

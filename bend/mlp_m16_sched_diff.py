@@ -8,6 +8,7 @@ Exit status 0 iff IDENTICAL. This is differential evidence for the one instance 
 bend/mlp_m16_sched_laws.bend.
 
 Usage: python3 -B bend/mlp_m16_sched_diff.py [GEN_TABLE_PY] [--out HEADER]
+  GEN_TABLE_PY: the independent Python reference (default: the tracked bend/gen/mlp_m16_sched_ref.py).
 """
 
 from __future__ import annotations
@@ -18,10 +19,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/MLP_M16_SCHED_TABLE.bend"
-DEFAULT_REFERENCE = "/tmp/kernel-work/PersistMLP/gen_table.py"
+DEFAULT_REFERENCE = REPO / "bend/gen/mlp_m16_sched_ref.py"
 
 
 def fail(msg: str) -> None:
@@ -45,10 +49,10 @@ def main(argv: list[str]) -> int:
         argv = argv[:i] + argv[i + 2 :]
     if len(argv) > 1:
         fail("usage: mlp_m16_sched_diff.py [GEN_TABLE_PY] [--out HEADER]")
-    reference = Path(argv[0] if argv else DEFAULT_REFERENCE)
+    reference = Path(argv[0]) if argv else DEFAULT_REFERENCE
     if not reference.is_file():
         fail(f"reference {reference} is absent")
-    bend = run([BEND, TABLE])
+    bend = run([source_link.bend(), TABLE])
     python = run([sys.executable, "-B", str(reference)])
     if not bend:
         fail("the Bend emitter printed nothing")

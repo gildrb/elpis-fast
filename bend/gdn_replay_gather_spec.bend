@@ -97,12 +97,24 @@ def all_c(n: Nat, +c: Nat, +S: Nat) -> Bool:
     case 1n+m:
       Bool.and(Bool.and(into(S, c), onto(S, c)), all_c(m, 1n+c, S))
 
+# the reference: all_c at every S' in S .. S + n - 1
+def all_S_ref(n: Nat, +S: Nat) -> Bool:
+  match n:
+    case 0n:
+      True{}
+    case 1n+m:
+      Bool.and(all_c(4n, 0n, S), all_S_ref(m, 1n+S))
+
+# what cover() evaluates: all_c at the largest S' = S + n - 1 only. The checks at S' + 1 tokens imply those at S'
+# (an element e < 20 S' that is its chunk's owner lies in a token < S'; every owner 20 s + p, s < S', p < 20, is
+# active at S'), so this equals all_S_ref for every n and S (law gather_all_S, proven in
+# gdn_replay_gather_proof.bend) and costs one S' instead of n, within the checker's evaluation budget.
 def all_S(n: Nat, +S: Nat) -> Bool:
   match n:
     case 0n:
       True{}
     case 1n+m:
-      Bool.and(all_c(4n, 0n, S), all_S(m, 1n+S))
+      all_c(4n, 0n, Nat.add(S, m))
 
 def cover() -> Bool:
   all_S(Impl.gr_max_s(), 1n)

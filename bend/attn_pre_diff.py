@@ -31,7 +31,8 @@ after store_head); the harness passes that head's pointer for `sh_head`.
 Differential evidence on finite instances, not a proof. `--mutate NAME` applies a deliberate
 mutation of attn_small.cu that the check must reject.
 
-Usage: python3 attn_pre_diff.py [--mutate NAME] [ENGINE_PACKAGE_DIR]
+Usage: python3 attn_pre_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
+  ENGINE_PACKAGE_DIR: OUT/patched of bend/engine_trees.py.
 """
 
 from __future__ import annotations
@@ -43,9 +44,10 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
 TABLE = "ATTN_PRE_TABLE.bend"
-DEFAULT_ROOT = "/tmp/kernel-work/AttnSmall/c"
 
 # Must match ATTN_PRE_TABLE.bend main
 HS = [(28, 1), (28, 2), (28, 3), (28, 4), (28, 8), (5, 2), (4, 8), (1, 1)]
@@ -605,19 +607,22 @@ def main(argv: list[str]) -> None:
         argv = [argv[0]] + argv[3:]
         if mutate not in MUTATIONS:
             fail(f"unknown mutation {mutate}; known: {', '.join(MUTATIONS)}")
-    root = Path(argv[1] if len(argv) > 1 else DEFAULT_ROOT)
+    if len(argv) != 2:
+        fail(__doc__)
+    root = Path(argv[1])
     q = quotes(root, mutate)
     with tempfile.TemporaryDirectory() as td:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(q))
         exe = Path(td) / "diff"
-        r = subprocess.run(["/tmp/cpu-lock.sh", "c++", "-O0", "-std=c++17", "-w", "-fno-strict-aliasing", "-o", str(exe), str(c)],
+        r = subprocess.run(source_link.locked(["c++", "-O0", "-std=c++17", "-w", "-fno-strict-aliasing", "-o", str(exe), str(c)]),
                            capture_output=True, text=True)
         if r.returncode != 0:
             print(r.stderr[-3000:])
             fail("C++ harness does not compile")
-        cres = subprocess.run(["/tmp/cpu-lock.sh", str(exe)], capture_output=True, text=True)
-    bres = subprocess.run(["/tmp/cpu-lock.sh", BEND, TABLE], cwd=HERE, capture_output=True, text=True, check=True)
+        cres = subprocess.run(source_link.locked([str(exe)]), capture_output=True, text=True)
+    bres = subprocess.run(source_link.locked([source_link.bend(), TABLE]), cwd=HERE, capture_output=True, text=True,
+                          check=True)
     same = cres.stdout == bres.stdout
     print(cres.stderr.strip()[-2000:] or f"C table program exit status {cres.returncode}")
     print(f"table lines: C {len(cres.stdout.splitlines())}, Bend {len(bres.stdout.splitlines())}; byte-identical: {same}")

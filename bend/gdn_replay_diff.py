@@ -10,7 +10,9 @@ line-by-line Python ports of the CUDA integer indexing of gdn.cu. The result is 
 byte with the Bend program's output. This is differential evidence on a finite instance, not a
 proof of equivalence.
 
-Usage: python3 bend/gdn_replay_diff.py [TREE_ROOT] [RECURRENT_UTIL_PY]
+Usage: python3 bend/gdn_replay_diff.py TREE_ROOT RECURRENT_UTIL_PY
+  TREE_ROOT: OUT/patched of bend/engine_trees.py.
+  RECURRENT_UTIL_PY: OUT/patched/cache/recurrent_util.py (no patch changes it; it is the stock file).
 """
 
 from __future__ import annotations
@@ -24,16 +26,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
-TABLE = "bend/GDN_REPLAY_TABLE.bend"
-DEFAULT_TREE = "/tmp/kernel-work/ReplayProof/tree"
-DEFAULT_RECURRENT_UTIL = "/tmp/kernel-work/DraftHead2/base_c/cache/recurrent_util.py"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
 
-# Pins: post-images of the patch series, read from the manifests (never hardcoded here)
+REPO = source_link.REPO
+TABLE = "bend/GDN_REPLAY_TABLE.bend"
+
+# Pins: post-images of the full patch series, read from the manifests (never hardcoded here).
+# exl3-ext patches also change generator/gdn_rewind.py and generator/generator.py, so their
+# shipped post-images are in exl3-ext.json, not in exl3-patches.json.
 MANIFEST_FILES = {
-    "patches/exl3/exl3-patches.json": ("generator/gdn_rewind.py", "generator/generator.py"),
     "patches/exl3-ext/exl3-ext.json": (
+        "generator/gdn_rewind.py", "generator/generator.py",
         "modules/gated_delta_net.py", "exllamav3_ext/gdn.cu", "exllamav3_ext/gdn.cuh"
     ),
 }
@@ -703,8 +708,9 @@ def engine_table(ns: dict, num_rejected) -> str:
 
 
 def bend_table() -> str:
-    p = subprocess.run([BEND, TABLE], cwd=REPO, capture_output=True, text=True, timeout=300)
-    check(p.returncode == 0, f"{BEND} {TABLE} exited {p.returncode}: {p.stderr.strip()}")
+    bend = source_link.bend()
+    p = subprocess.run([bend, TABLE], cwd=REPO, capture_output=True, text=True, timeout=300)
+    check(p.returncode == 0, f"{bend} {TABLE} exited {p.returncode}: {p.stderr.strip()}")
     try:
         s = json.loads(p.stdout.strip())
     except json.JSONDecodeError as e:
@@ -714,9 +720,9 @@ def bend_table() -> str:
 
 
 def main(argv: list) -> int:
-    check(len(argv) <= 3, "usage: gdn_replay_diff.py [TREE_ROOT] [RECURRENT_UTIL_PY]")
-    tree = Path(argv[1] if len(argv) > 1 else DEFAULT_TREE)
-    recurrent_util = Path(argv[2] if len(argv) > 2 else DEFAULT_RECURRENT_UTIL)
+    check(len(argv) == 3, "usage: gdn_replay_diff.py TREE_ROOT RECURRENT_UTIL_PY")
+    tree = Path(argv[1])
+    recurrent_util = Path(argv[2])
     verify_pins(tree, recurrent_util)
     num_rejected = load_num_rejected(tree)
     ns = load_host(tree, recurrent_util)

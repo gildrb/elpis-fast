@@ -31,6 +31,7 @@ Differential evidence on finite instances, not a proof. `--mutate NAME` applies 
 mutation that the check must reject.
 
 Usage: python3 bend/gdn_ba_ksplit_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
+  ENGINE_PACKAGE_DIR: OUT/patched of bend/engine_trees.py.
 """
 
 from __future__ import annotations
@@ -40,8 +41,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/GDN_BA_KSPLIT_TABLE.bend"
 
 # name: (original, replacement, occurrences)
@@ -288,9 +292,10 @@ def main(argv: list[str]) -> None:
     out.append("T 1 0 0 3 0 1 0:" + show(task(1, 0, 0, 3, 0, 1, False)))
     ctext = "\n".join(out) + "\n"
 
-    bres = subprocess.run(["/tmp/cpu-lock.sh", BEND, TABLE], cwd=REPO, capture_output=True, text=True, timeout=1800)
+    bend = source_link.bend()
+    bres = subprocess.run(source_link.locked([bend, TABLE]), cwd=REPO, capture_output=True, text=True, timeout=1800)
     if bres.returncode != 0:
-        fail(f"{BEND} {TABLE} exited {bres.returncode}: {bres.stderr.strip()[-500:]}")
+        fail(f"{bend} {TABLE} exited {bres.returncode}: {bres.stderr.strip()[-500:]}")
     btext = bres.stdout
     if btext.endswith("\n\n"):
         btext = btext[:-1]                  # IO.print's own newline after the table's last "\n"

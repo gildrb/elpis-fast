@@ -403,8 +403,2276 @@ def q1s_go(+n: Nat, +t: Nat, +b2: Nat, +b3: Nat, +b4: Nat, +b5: Nat, +b6: Nat, +
         hl => q1s_go(m, t, b2, b3, b4, b5, b6, b7, hl, at_and_l(q1s(m, b2, b3, b4, b5, b6, b7), q2s(b2, b3, b4, b5, b6, b7, m), h)))
 
 # ---------------------------------------------------------------------------------------------
-# Every legal shape's decision procedure evaluates to True: the `{==}` shape_true passes to
-# shape_chain for q1s(1n, 2n, .., 7n) is the one computed fact (the checker evaluates all 5040 shapes)
+# Every legal shape's decision procedure evaluates to True (all 5040 shapes), in kernel-sized pieces: each sh_ def
+# evaluates one q7s group (7 shapes) by `{==}`; the q?s_i introductions glue the groups into
+# q1s(1n, 2n, .., 7n) syntactically (the checker compares the glued facts without evaluating them)
+
+def at_and_i(+a: Bool, -b: Bool, ha: {a == True{} : Bool}, hb: {b == True{} : Bool}) -> {Bool.and(a, b) == True{} : Bool}:
+  match a:
+    case False{}:
+      Empty.absurd({Bool.and(False{}, b) == True{} : Bool}, Ar.ar_false_true(ha))
+    case True{}:
+      hb
+
+def q1s_i(+m: Nat, +b2: Nat, +b3: Nat, +b4: Nat, +b5: Nat, +b6: Nat, +b7: Nat, h1: {q1s(m, b2, b3, b4, b5, b6, b7) == True{} : Bool}, h2: {q2s(b2, b3, b4, b5, b6, b7, m) == True{} : Bool})
+  -> {q1s(1n+m, b2, b3, b4, b5, b6, b7) == True{} : Bool}:
+  at_and_i(q1s(m, b2, b3, b4, b5, b6, b7), q2s(b2, b3, b4, b5, b6, b7, m), h1, h2)
+
+def q2s_i(+m: Nat, +b3: Nat, +b4: Nat, +b5: Nat, +b6: Nat, +b7: Nat, +q1: Nat, h1: {q2s(m, b3, b4, b5, b6, b7, q1) == True{} : Bool}, h2: {q3s(b3, b4, b5, b6, b7, q1, m) == True{} : Bool})
+  -> {q2s(1n+m, b3, b4, b5, b6, b7, q1) == True{} : Bool}:
+  at_and_i(q2s(m, b3, b4, b5, b6, b7, q1), q3s(b3, b4, b5, b6, b7, q1, m), h1, h2)
+
+def q3s_i(+m: Nat, +b4: Nat, +b5: Nat, +b6: Nat, +b7: Nat, +q1: Nat, +q2: Nat, h1: {q3s(m, b4, b5, b6, b7, q1, q2) == True{} : Bool}, h2: {q4s(b4, b5, b6, b7, q1, q2, m) == True{} : Bool})
+  -> {q3s(1n+m, b4, b5, b6, b7, q1, q2) == True{} : Bool}:
+  at_and_i(q3s(m, b4, b5, b6, b7, q1, q2), q4s(b4, b5, b6, b7, q1, q2, m), h1, h2)
+
+def q4s_i(+m: Nat, +b5: Nat, +b6: Nat, +b7: Nat, +q1: Nat, +q2: Nat, +q3: Nat, h1: {q4s(m, b5, b6, b7, q1, q2, q3) == True{} : Bool}, h2: {q5s(b5, b6, b7, q1, q2, q3, m) == True{} : Bool})
+  -> {q4s(1n+m, b5, b6, b7, q1, q2, q3) == True{} : Bool}:
+  at_and_i(q4s(m, b5, b6, b7, q1, q2, q3), q5s(b5, b6, b7, q1, q2, q3, m), h1, h2)
+
+def q5s_i(+m: Nat, +b6: Nat, +b7: Nat, +q1: Nat, +q2: Nat, +q3: Nat, +q4: Nat, h1: {q5s(m, b6, b7, q1, q2, q3, q4) == True{} : Bool}, h2: {q6s(b6, b7, q1, q2, q3, q4, m) == True{} : Bool})
+  -> {q5s(1n+m, b6, b7, q1, q2, q3, q4) == True{} : Bool}:
+  at_and_i(q5s(m, b6, b7, q1, q2, q3, q4), q6s(b6, b7, q1, q2, q3, q4, m), h1, h2)
+
+def q6s_i(+m: Nat, +b7: Nat, +q1: Nat, +q2: Nat, +q3: Nat, +q4: Nat, +q5: Nat, h1: {q6s(m, b7, q1, q2, q3, q4, q5) == True{} : Bool}, h2: {q7s(b7, q1, q2, q3, q4, q5, m) == True{} : Bool})
+  -> {q6s(1n+m, b7, q1, q2, q3, q4, q5) == True{} : Bool}:
+  at_and_i(q6s(m, b7, q1, q2, q3, q4, q5), q7s(b7, q1, q2, q3, q4, q5, m), h1, h2)
+
+def sh_0_0_0_0_0_0() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_0_1() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_0_2() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_0_3() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_0_4() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_0_5() -> {q7s(7n, 0n, 0n, 0n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_0() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_1() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_2() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_3() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_4() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_1_5() -> {q7s(7n, 0n, 0n, 0n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_0() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_1() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_2() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_3() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_4() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_2_5() -> {q7s(7n, 0n, 0n, 0n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_0() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_1() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_2() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_3() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_4() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_3_5() -> {q7s(7n, 0n, 0n, 0n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_0() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_1() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_2() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_3() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_4() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_0_4_5() -> {q7s(7n, 0n, 0n, 0n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_0() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_1() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_2() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_3() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_4() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_0_5() -> {q7s(7n, 0n, 0n, 0n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_0() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_1() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_2() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_3() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_4() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_1_5() -> {q7s(7n, 0n, 0n, 0n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_0() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_1() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_2() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_3() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_4() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_2_5() -> {q7s(7n, 0n, 0n, 0n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_0() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_1() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_2() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_3() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_4() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_3_5() -> {q7s(7n, 0n, 0n, 0n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_0() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_1() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_2() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_3() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_4() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_1_4_5() -> {q7s(7n, 0n, 0n, 0n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_0() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_1() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_2() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_3() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_4() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_0_5() -> {q7s(7n, 0n, 0n, 0n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_0() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_1() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_2() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_3() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_4() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_1_5() -> {q7s(7n, 0n, 0n, 0n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_0() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_1() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_2() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_3() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_4() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_2_5() -> {q7s(7n, 0n, 0n, 0n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_0() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_1() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_2() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_3() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_4() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_3_5() -> {q7s(7n, 0n, 0n, 0n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_0() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_1() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_2() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_3() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_4() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_2_4_5() -> {q7s(7n, 0n, 0n, 0n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_0() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_1() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_2() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_3() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_4() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_0_5() -> {q7s(7n, 0n, 0n, 0n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_0() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_1() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_2() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_3() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_4() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_1_5() -> {q7s(7n, 0n, 0n, 0n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_0() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_1() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_2() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_3() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_4() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_2_5() -> {q7s(7n, 0n, 0n, 0n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_0() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_1() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_2() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_3() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_4() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_3_5() -> {q7s(7n, 0n, 0n, 0n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_0() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_1() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_2() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_3() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_4() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_0_3_4_5() -> {q7s(7n, 0n, 0n, 0n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_0() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_1() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_2() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_3() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_4() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_0_5() -> {q7s(7n, 0n, 0n, 1n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_0() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_1() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_2() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_3() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_4() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_1_5() -> {q7s(7n, 0n, 0n, 1n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_0() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_1() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_2() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_3() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_4() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_2_5() -> {q7s(7n, 0n, 0n, 1n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_0() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_1() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_2() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_3() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_4() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_3_5() -> {q7s(7n, 0n, 0n, 1n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_0() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_1() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_2() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_3() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_4() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_0_4_5() -> {q7s(7n, 0n, 0n, 1n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_0() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_1() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_2() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_3() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_4() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_0_5() -> {q7s(7n, 0n, 0n, 1n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_0() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_1() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_2() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_3() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_4() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_1_5() -> {q7s(7n, 0n, 0n, 1n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_0() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_1() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_2() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_3() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_4() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_2_5() -> {q7s(7n, 0n, 0n, 1n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_0() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_1() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_2() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_3() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_4() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_3_5() -> {q7s(7n, 0n, 0n, 1n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_0() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_1() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_2() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_3() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_4() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_1_4_5() -> {q7s(7n, 0n, 0n, 1n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_0() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_1() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_2() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_3() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_4() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_0_5() -> {q7s(7n, 0n, 0n, 1n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_0() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_1() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_2() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_3() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_4() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_1_5() -> {q7s(7n, 0n, 0n, 1n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_0() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_1() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_2() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_3() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_4() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_2_5() -> {q7s(7n, 0n, 0n, 1n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_0() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_1() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_2() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_3() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_4() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_3_5() -> {q7s(7n, 0n, 0n, 1n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_0() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_1() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_2() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_3() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_4() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_2_4_5() -> {q7s(7n, 0n, 0n, 1n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_0() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_1() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_2() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_3() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_4() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_0_5() -> {q7s(7n, 0n, 0n, 1n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_0() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_1() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_2() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_3() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_4() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_1_5() -> {q7s(7n, 0n, 0n, 1n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_0() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_1() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_2() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_3() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_4() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_2_5() -> {q7s(7n, 0n, 0n, 1n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_0() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_1() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_2() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_3() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_4() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_3_5() -> {q7s(7n, 0n, 0n, 1n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_0() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_1() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_2() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_3() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_4() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_1_3_4_5() -> {q7s(7n, 0n, 0n, 1n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_0() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_1() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_2() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_3() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_4() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_0_5() -> {q7s(7n, 0n, 0n, 2n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_0() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_1() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_2() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_3() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_4() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_1_5() -> {q7s(7n, 0n, 0n, 2n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_0() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_1() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_2() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_3() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_4() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_2_5() -> {q7s(7n, 0n, 0n, 2n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_0() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_1() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_2() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_3() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_4() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_3_5() -> {q7s(7n, 0n, 0n, 2n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_0() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_1() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_2() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_3() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_4() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_0_4_5() -> {q7s(7n, 0n, 0n, 2n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_0() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_1() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_2() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_3() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_4() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_0_5() -> {q7s(7n, 0n, 0n, 2n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_0() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_1() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_2() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_3() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_4() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_1_5() -> {q7s(7n, 0n, 0n, 2n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_0() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_1() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_2() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_3() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_4() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_2_5() -> {q7s(7n, 0n, 0n, 2n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_0() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_1() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_2() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_3() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_4() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_3_5() -> {q7s(7n, 0n, 0n, 2n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_0() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_1() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_2() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_3() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_4() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_1_4_5() -> {q7s(7n, 0n, 0n, 2n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_0() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_1() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_2() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_3() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_4() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_0_5() -> {q7s(7n, 0n, 0n, 2n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_0() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_1() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_2() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_3() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_4() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_1_5() -> {q7s(7n, 0n, 0n, 2n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_0() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_1() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_2() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_3() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_4() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_2_5() -> {q7s(7n, 0n, 0n, 2n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_0() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_1() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_2() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_3() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_4() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_3_5() -> {q7s(7n, 0n, 0n, 2n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_0() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_1() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_2() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_3() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_4() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_2_4_5() -> {q7s(7n, 0n, 0n, 2n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_0() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_1() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_2() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_3() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_4() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_0_5() -> {q7s(7n, 0n, 0n, 2n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_0() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_1() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_2() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_3() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_4() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_1_5() -> {q7s(7n, 0n, 0n, 2n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_0() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_1() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_2() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_3() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_4() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_2_5() -> {q7s(7n, 0n, 0n, 2n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_0() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_1() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_2() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_3() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_4() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_3_5() -> {q7s(7n, 0n, 0n, 2n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_0() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_1() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_2() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_3() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_4() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_0_2_3_4_5() -> {q7s(7n, 0n, 0n, 2n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_0() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_1() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_2() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_3() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_4() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_0_5() -> {q7s(7n, 0n, 1n, 0n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_0() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_1() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_2() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_3() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_4() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_1_5() -> {q7s(7n, 0n, 1n, 0n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_0() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_1() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_2() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_3() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_4() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_2_5() -> {q7s(7n, 0n, 1n, 0n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_0() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_1() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_2() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_3() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_4() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_3_5() -> {q7s(7n, 0n, 1n, 0n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_0() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_1() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_2() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_3() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_4() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_0_4_5() -> {q7s(7n, 0n, 1n, 0n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_0() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_1() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_2() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_3() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_4() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_0_5() -> {q7s(7n, 0n, 1n, 0n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_0() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_1() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_2() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_3() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_4() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_1_5() -> {q7s(7n, 0n, 1n, 0n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_0() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_1() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_2() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_3() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_4() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_2_5() -> {q7s(7n, 0n, 1n, 0n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_0() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_1() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_2() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_3() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_4() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_3_5() -> {q7s(7n, 0n, 1n, 0n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_0() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_1() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_2() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_3() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_4() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_1_4_5() -> {q7s(7n, 0n, 1n, 0n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_0() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_1() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_2() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_3() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_4() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_0_5() -> {q7s(7n, 0n, 1n, 0n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_0() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_1() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_2() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_3() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_4() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_1_5() -> {q7s(7n, 0n, 1n, 0n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_0() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_1() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_2() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_3() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_4() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_2_5() -> {q7s(7n, 0n, 1n, 0n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_0() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_1() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_2() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_3() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_4() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_3_5() -> {q7s(7n, 0n, 1n, 0n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_0() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_1() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_2() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_3() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_4() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_2_4_5() -> {q7s(7n, 0n, 1n, 0n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_0() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_1() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_2() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_3() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_4() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_0_5() -> {q7s(7n, 0n, 1n, 0n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_0() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_1() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_2() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_3() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_4() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_1_5() -> {q7s(7n, 0n, 1n, 0n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_0() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_1() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_2() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_3() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_4() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_2_5() -> {q7s(7n, 0n, 1n, 0n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_0() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_1() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_2() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_3() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_4() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_3_5() -> {q7s(7n, 0n, 1n, 0n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_0() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_1() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_2() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_3() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_4() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_0_3_4_5() -> {q7s(7n, 0n, 1n, 0n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_0() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_1() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_2() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_3() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_4() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_0_5() -> {q7s(7n, 0n, 1n, 1n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_0() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_1() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_2() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_3() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_4() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_1_5() -> {q7s(7n, 0n, 1n, 1n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_0() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_1() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_2() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_3() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_4() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_2_5() -> {q7s(7n, 0n, 1n, 1n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_0() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_1() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_2() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_3() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_4() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_3_5() -> {q7s(7n, 0n, 1n, 1n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_0() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_1() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_2() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_3() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_4() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_0_4_5() -> {q7s(7n, 0n, 1n, 1n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_0() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_1() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_2() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_3() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_4() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_0_5() -> {q7s(7n, 0n, 1n, 1n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_0() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_1() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_2() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_3() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_4() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_1_5() -> {q7s(7n, 0n, 1n, 1n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_0() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_1() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_2() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_3() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_4() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_2_5() -> {q7s(7n, 0n, 1n, 1n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_0() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_1() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_2() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_3() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_4() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_3_5() -> {q7s(7n, 0n, 1n, 1n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_0() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_1() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_2() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_3() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_4() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_1_4_5() -> {q7s(7n, 0n, 1n, 1n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_0() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_1() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_2() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_3() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_4() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_0_5() -> {q7s(7n, 0n, 1n, 1n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_0() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_1() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_2() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_3() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_4() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_1_5() -> {q7s(7n, 0n, 1n, 1n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_0() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_1() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_2() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_3() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_4() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_2_5() -> {q7s(7n, 0n, 1n, 1n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_0() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_1() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_2() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_3() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_4() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_3_5() -> {q7s(7n, 0n, 1n, 1n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_0() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_1() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_2() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_3() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_4() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_2_4_5() -> {q7s(7n, 0n, 1n, 1n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_0() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_1() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_2() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_3() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_4() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_0_5() -> {q7s(7n, 0n, 1n, 1n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_0() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_1() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_2() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_3() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_4() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_1_5() -> {q7s(7n, 0n, 1n, 1n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_0() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_1() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_2() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_3() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_4() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_2_5() -> {q7s(7n, 0n, 1n, 1n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_0() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_1() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_2() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_3() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_4() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_3_5() -> {q7s(7n, 0n, 1n, 1n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_0() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_1() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_2() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_3() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_4() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_1_3_4_5() -> {q7s(7n, 0n, 1n, 1n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_0() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_1() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_2() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_3() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_4() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_0_5() -> {q7s(7n, 0n, 1n, 2n, 0n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_0() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_1() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_2() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_3() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_4() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_1_5() -> {q7s(7n, 0n, 1n, 2n, 0n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_0() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_1() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_2() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_3() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_4() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_2_5() -> {q7s(7n, 0n, 1n, 2n, 0n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_0() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_1() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_2() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_3() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_4() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_3_5() -> {q7s(7n, 0n, 1n, 2n, 0n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_0() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_1() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_2() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_3() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_4() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_0_4_5() -> {q7s(7n, 0n, 1n, 2n, 0n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_0() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_1() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_2() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_3() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_4() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_0_5() -> {q7s(7n, 0n, 1n, 2n, 1n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_0() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_1() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_2() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_3() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_4() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_1_5() -> {q7s(7n, 0n, 1n, 2n, 1n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_0() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_1() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_2() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_3() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_4() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_2_5() -> {q7s(7n, 0n, 1n, 2n, 1n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_0() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_1() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_2() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_3() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_4() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_3_5() -> {q7s(7n, 0n, 1n, 2n, 1n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_0() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_1() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_2() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_3() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_4() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_1_4_5() -> {q7s(7n, 0n, 1n, 2n, 1n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_0() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_1() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_2() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_3() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_4() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_0_5() -> {q7s(7n, 0n, 1n, 2n, 2n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_0() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_1() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_2() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_3() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_4() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_1_5() -> {q7s(7n, 0n, 1n, 2n, 2n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_0() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_1() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_2() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_3() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_4() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_2_5() -> {q7s(7n, 0n, 1n, 2n, 2n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_0() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_1() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_2() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_3() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_4() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_3_5() -> {q7s(7n, 0n, 1n, 2n, 2n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_0() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_1() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_2() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_3() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_4() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_2_4_5() -> {q7s(7n, 0n, 1n, 2n, 2n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_0() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_1() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_2() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_3() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_4() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_0_5() -> {q7s(7n, 0n, 1n, 2n, 3n, 0n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_0() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_1() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_2() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_3() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_4() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_1_5() -> {q7s(7n, 0n, 1n, 2n, 3n, 1n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_0() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_1() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_2() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_3() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_4() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_2_5() -> {q7s(7n, 0n, 1n, 2n, 3n, 2n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_0() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_1() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_2() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_3() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_4() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_3_5() -> {q7s(7n, 0n, 1n, 2n, 3n, 3n, 5n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_0() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 0n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_1() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 1n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_2() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 2n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_3() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 3n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_4() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 4n) == True{} : Bool}:
+  {==}
+
+def sh_0_1_2_3_4_5() -> {q7s(7n, 0n, 1n, 2n, 3n, 4n, 5n) == True{} : Bool}:
+  {==}
+
+def sq5_0_0_0_0() -> {q5s(5n, 6n, 7n, 0n, 0n, 0n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 0n, 0n, q5s_i(3n, 6n, 7n, 0n, 0n, 0n, 0n, q5s_i(2n, 6n, 7n, 0n, 0n, 0n, 0n, q5s_i(1n, 6n, 7n, 0n, 0n, 0n, 0n, q5s_i(0n, 6n, 7n, 0n, 0n, 0n, 0n, {==}, q6s_i(5n, 7n, 0n, 0n, 0n, 0n, 0n, q6s_i(4n, 7n, 0n, 0n, 0n, 0n, 0n, q6s_i(3n, 7n, 0n, 0n, 0n, 0n, 0n, q6s_i(2n, 7n, 0n, 0n, 0n, 0n, 0n, q6s_i(1n, 7n, 0n, 0n, 0n, 0n, 0n, q6s_i(0n, 7n, 0n, 0n, 0n, 0n, 0n, {==}, sh_0_0_0_0_0_0()), sh_0_0_0_0_0_1()), sh_0_0_0_0_0_2()), sh_0_0_0_0_0_3()), sh_0_0_0_0_0_4()), sh_0_0_0_0_0_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 0n, 1n, q6s_i(4n, 7n, 0n, 0n, 0n, 0n, 1n, q6s_i(3n, 7n, 0n, 0n, 0n, 0n, 1n, q6s_i(2n, 7n, 0n, 0n, 0n, 0n, 1n, q6s_i(1n, 7n, 0n, 0n, 0n, 0n, 1n, q6s_i(0n, 7n, 0n, 0n, 0n, 0n, 1n, {==}, sh_0_0_0_0_1_0()), sh_0_0_0_0_1_1()), sh_0_0_0_0_1_2()), sh_0_0_0_0_1_3()), sh_0_0_0_0_1_4()), sh_0_0_0_0_1_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 0n, 2n, q6s_i(4n, 7n, 0n, 0n, 0n, 0n, 2n, q6s_i(3n, 7n, 0n, 0n, 0n, 0n, 2n, q6s_i(2n, 7n, 0n, 0n, 0n, 0n, 2n, q6s_i(1n, 7n, 0n, 0n, 0n, 0n, 2n, q6s_i(0n, 7n, 0n, 0n, 0n, 0n, 2n, {==}, sh_0_0_0_0_2_0()), sh_0_0_0_0_2_1()), sh_0_0_0_0_2_2()), sh_0_0_0_0_2_3()), sh_0_0_0_0_2_4()), sh_0_0_0_0_2_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 0n, 3n, q6s_i(4n, 7n, 0n, 0n, 0n, 0n, 3n, q6s_i(3n, 7n, 0n, 0n, 0n, 0n, 3n, q6s_i(2n, 7n, 0n, 0n, 0n, 0n, 3n, q6s_i(1n, 7n, 0n, 0n, 0n, 0n, 3n, q6s_i(0n, 7n, 0n, 0n, 0n, 0n, 3n, {==}, sh_0_0_0_0_3_0()), sh_0_0_0_0_3_1()), sh_0_0_0_0_3_2()), sh_0_0_0_0_3_3()), sh_0_0_0_0_3_4()), sh_0_0_0_0_3_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 0n, 4n, q6s_i(4n, 7n, 0n, 0n, 0n, 0n, 4n, q6s_i(3n, 7n, 0n, 0n, 0n, 0n, 4n, q6s_i(2n, 7n, 0n, 0n, 0n, 0n, 4n, q6s_i(1n, 7n, 0n, 0n, 0n, 0n, 4n, q6s_i(0n, 7n, 0n, 0n, 0n, 0n, 4n, {==}, sh_0_0_0_0_4_0()), sh_0_0_0_0_4_1()), sh_0_0_0_0_4_2()), sh_0_0_0_0_4_3()), sh_0_0_0_0_4_4()), sh_0_0_0_0_4_5()))
+
+def sq5_0_0_0_1() -> {q5s(5n, 6n, 7n, 0n, 0n, 0n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 0n, 1n, q5s_i(3n, 6n, 7n, 0n, 0n, 0n, 1n, q5s_i(2n, 6n, 7n, 0n, 0n, 0n, 1n, q5s_i(1n, 6n, 7n, 0n, 0n, 0n, 1n, q5s_i(0n, 6n, 7n, 0n, 0n, 0n, 1n, {==}, q6s_i(5n, 7n, 0n, 0n, 0n, 1n, 0n, q6s_i(4n, 7n, 0n, 0n, 0n, 1n, 0n, q6s_i(3n, 7n, 0n, 0n, 0n, 1n, 0n, q6s_i(2n, 7n, 0n, 0n, 0n, 1n, 0n, q6s_i(1n, 7n, 0n, 0n, 0n, 1n, 0n, q6s_i(0n, 7n, 0n, 0n, 0n, 1n, 0n, {==}, sh_0_0_0_1_0_0()), sh_0_0_0_1_0_1()), sh_0_0_0_1_0_2()), sh_0_0_0_1_0_3()), sh_0_0_0_1_0_4()), sh_0_0_0_1_0_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 1n, 1n, q6s_i(4n, 7n, 0n, 0n, 0n, 1n, 1n, q6s_i(3n, 7n, 0n, 0n, 0n, 1n, 1n, q6s_i(2n, 7n, 0n, 0n, 0n, 1n, 1n, q6s_i(1n, 7n, 0n, 0n, 0n, 1n, 1n, q6s_i(0n, 7n, 0n, 0n, 0n, 1n, 1n, {==}, sh_0_0_0_1_1_0()), sh_0_0_0_1_1_1()), sh_0_0_0_1_1_2()), sh_0_0_0_1_1_3()), sh_0_0_0_1_1_4()), sh_0_0_0_1_1_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 1n, 2n, q6s_i(4n, 7n, 0n, 0n, 0n, 1n, 2n, q6s_i(3n, 7n, 0n, 0n, 0n, 1n, 2n, q6s_i(2n, 7n, 0n, 0n, 0n, 1n, 2n, q6s_i(1n, 7n, 0n, 0n, 0n, 1n, 2n, q6s_i(0n, 7n, 0n, 0n, 0n, 1n, 2n, {==}, sh_0_0_0_1_2_0()), sh_0_0_0_1_2_1()), sh_0_0_0_1_2_2()), sh_0_0_0_1_2_3()), sh_0_0_0_1_2_4()), sh_0_0_0_1_2_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 1n, 3n, q6s_i(4n, 7n, 0n, 0n, 0n, 1n, 3n, q6s_i(3n, 7n, 0n, 0n, 0n, 1n, 3n, q6s_i(2n, 7n, 0n, 0n, 0n, 1n, 3n, q6s_i(1n, 7n, 0n, 0n, 0n, 1n, 3n, q6s_i(0n, 7n, 0n, 0n, 0n, 1n, 3n, {==}, sh_0_0_0_1_3_0()), sh_0_0_0_1_3_1()), sh_0_0_0_1_3_2()), sh_0_0_0_1_3_3()), sh_0_0_0_1_3_4()), sh_0_0_0_1_3_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 1n, 4n, q6s_i(4n, 7n, 0n, 0n, 0n, 1n, 4n, q6s_i(3n, 7n, 0n, 0n, 0n, 1n, 4n, q6s_i(2n, 7n, 0n, 0n, 0n, 1n, 4n, q6s_i(1n, 7n, 0n, 0n, 0n, 1n, 4n, q6s_i(0n, 7n, 0n, 0n, 0n, 1n, 4n, {==}, sh_0_0_0_1_4_0()), sh_0_0_0_1_4_1()), sh_0_0_0_1_4_2()), sh_0_0_0_1_4_3()), sh_0_0_0_1_4_4()), sh_0_0_0_1_4_5()))
+
+def sq5_0_0_0_2() -> {q5s(5n, 6n, 7n, 0n, 0n, 0n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 0n, 2n, q5s_i(3n, 6n, 7n, 0n, 0n, 0n, 2n, q5s_i(2n, 6n, 7n, 0n, 0n, 0n, 2n, q5s_i(1n, 6n, 7n, 0n, 0n, 0n, 2n, q5s_i(0n, 6n, 7n, 0n, 0n, 0n, 2n, {==}, q6s_i(5n, 7n, 0n, 0n, 0n, 2n, 0n, q6s_i(4n, 7n, 0n, 0n, 0n, 2n, 0n, q6s_i(3n, 7n, 0n, 0n, 0n, 2n, 0n, q6s_i(2n, 7n, 0n, 0n, 0n, 2n, 0n, q6s_i(1n, 7n, 0n, 0n, 0n, 2n, 0n, q6s_i(0n, 7n, 0n, 0n, 0n, 2n, 0n, {==}, sh_0_0_0_2_0_0()), sh_0_0_0_2_0_1()), sh_0_0_0_2_0_2()), sh_0_0_0_2_0_3()), sh_0_0_0_2_0_4()), sh_0_0_0_2_0_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 2n, 1n, q6s_i(4n, 7n, 0n, 0n, 0n, 2n, 1n, q6s_i(3n, 7n, 0n, 0n, 0n, 2n, 1n, q6s_i(2n, 7n, 0n, 0n, 0n, 2n, 1n, q6s_i(1n, 7n, 0n, 0n, 0n, 2n, 1n, q6s_i(0n, 7n, 0n, 0n, 0n, 2n, 1n, {==}, sh_0_0_0_2_1_0()), sh_0_0_0_2_1_1()), sh_0_0_0_2_1_2()), sh_0_0_0_2_1_3()), sh_0_0_0_2_1_4()), sh_0_0_0_2_1_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 2n, 2n, q6s_i(4n, 7n, 0n, 0n, 0n, 2n, 2n, q6s_i(3n, 7n, 0n, 0n, 0n, 2n, 2n, q6s_i(2n, 7n, 0n, 0n, 0n, 2n, 2n, q6s_i(1n, 7n, 0n, 0n, 0n, 2n, 2n, q6s_i(0n, 7n, 0n, 0n, 0n, 2n, 2n, {==}, sh_0_0_0_2_2_0()), sh_0_0_0_2_2_1()), sh_0_0_0_2_2_2()), sh_0_0_0_2_2_3()), sh_0_0_0_2_2_4()), sh_0_0_0_2_2_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 2n, 3n, q6s_i(4n, 7n, 0n, 0n, 0n, 2n, 3n, q6s_i(3n, 7n, 0n, 0n, 0n, 2n, 3n, q6s_i(2n, 7n, 0n, 0n, 0n, 2n, 3n, q6s_i(1n, 7n, 0n, 0n, 0n, 2n, 3n, q6s_i(0n, 7n, 0n, 0n, 0n, 2n, 3n, {==}, sh_0_0_0_2_3_0()), sh_0_0_0_2_3_1()), sh_0_0_0_2_3_2()), sh_0_0_0_2_3_3()), sh_0_0_0_2_3_4()), sh_0_0_0_2_3_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 2n, 4n, q6s_i(4n, 7n, 0n, 0n, 0n, 2n, 4n, q6s_i(3n, 7n, 0n, 0n, 0n, 2n, 4n, q6s_i(2n, 7n, 0n, 0n, 0n, 2n, 4n, q6s_i(1n, 7n, 0n, 0n, 0n, 2n, 4n, q6s_i(0n, 7n, 0n, 0n, 0n, 2n, 4n, {==}, sh_0_0_0_2_4_0()), sh_0_0_0_2_4_1()), sh_0_0_0_2_4_2()), sh_0_0_0_2_4_3()), sh_0_0_0_2_4_4()), sh_0_0_0_2_4_5()))
+
+def sq5_0_0_0_3() -> {q5s(5n, 6n, 7n, 0n, 0n, 0n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 0n, 3n, q5s_i(3n, 6n, 7n, 0n, 0n, 0n, 3n, q5s_i(2n, 6n, 7n, 0n, 0n, 0n, 3n, q5s_i(1n, 6n, 7n, 0n, 0n, 0n, 3n, q5s_i(0n, 6n, 7n, 0n, 0n, 0n, 3n, {==}, q6s_i(5n, 7n, 0n, 0n, 0n, 3n, 0n, q6s_i(4n, 7n, 0n, 0n, 0n, 3n, 0n, q6s_i(3n, 7n, 0n, 0n, 0n, 3n, 0n, q6s_i(2n, 7n, 0n, 0n, 0n, 3n, 0n, q6s_i(1n, 7n, 0n, 0n, 0n, 3n, 0n, q6s_i(0n, 7n, 0n, 0n, 0n, 3n, 0n, {==}, sh_0_0_0_3_0_0()), sh_0_0_0_3_0_1()), sh_0_0_0_3_0_2()), sh_0_0_0_3_0_3()), sh_0_0_0_3_0_4()), sh_0_0_0_3_0_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 3n, 1n, q6s_i(4n, 7n, 0n, 0n, 0n, 3n, 1n, q6s_i(3n, 7n, 0n, 0n, 0n, 3n, 1n, q6s_i(2n, 7n, 0n, 0n, 0n, 3n, 1n, q6s_i(1n, 7n, 0n, 0n, 0n, 3n, 1n, q6s_i(0n, 7n, 0n, 0n, 0n, 3n, 1n, {==}, sh_0_0_0_3_1_0()), sh_0_0_0_3_1_1()), sh_0_0_0_3_1_2()), sh_0_0_0_3_1_3()), sh_0_0_0_3_1_4()), sh_0_0_0_3_1_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 3n, 2n, q6s_i(4n, 7n, 0n, 0n, 0n, 3n, 2n, q6s_i(3n, 7n, 0n, 0n, 0n, 3n, 2n, q6s_i(2n, 7n, 0n, 0n, 0n, 3n, 2n, q6s_i(1n, 7n, 0n, 0n, 0n, 3n, 2n, q6s_i(0n, 7n, 0n, 0n, 0n, 3n, 2n, {==}, sh_0_0_0_3_2_0()), sh_0_0_0_3_2_1()), sh_0_0_0_3_2_2()), sh_0_0_0_3_2_3()), sh_0_0_0_3_2_4()), sh_0_0_0_3_2_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 3n, 3n, q6s_i(4n, 7n, 0n, 0n, 0n, 3n, 3n, q6s_i(3n, 7n, 0n, 0n, 0n, 3n, 3n, q6s_i(2n, 7n, 0n, 0n, 0n, 3n, 3n, q6s_i(1n, 7n, 0n, 0n, 0n, 3n, 3n, q6s_i(0n, 7n, 0n, 0n, 0n, 3n, 3n, {==}, sh_0_0_0_3_3_0()), sh_0_0_0_3_3_1()), sh_0_0_0_3_3_2()), sh_0_0_0_3_3_3()), sh_0_0_0_3_3_4()), sh_0_0_0_3_3_5())), q6s_i(5n, 7n, 0n, 0n, 0n, 3n, 4n, q6s_i(4n, 7n, 0n, 0n, 0n, 3n, 4n, q6s_i(3n, 7n, 0n, 0n, 0n, 3n, 4n, q6s_i(2n, 7n, 0n, 0n, 0n, 3n, 4n, q6s_i(1n, 7n, 0n, 0n, 0n, 3n, 4n, q6s_i(0n, 7n, 0n, 0n, 0n, 3n, 4n, {==}, sh_0_0_0_3_4_0()), sh_0_0_0_3_4_1()), sh_0_0_0_3_4_2()), sh_0_0_0_3_4_3()), sh_0_0_0_3_4_4()), sh_0_0_0_3_4_5()))
+
+def sq5_0_0_1_0() -> {q5s(5n, 6n, 7n, 0n, 0n, 1n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 1n, 0n, q5s_i(3n, 6n, 7n, 0n, 0n, 1n, 0n, q5s_i(2n, 6n, 7n, 0n, 0n, 1n, 0n, q5s_i(1n, 6n, 7n, 0n, 0n, 1n, 0n, q5s_i(0n, 6n, 7n, 0n, 0n, 1n, 0n, {==}, q6s_i(5n, 7n, 0n, 0n, 1n, 0n, 0n, q6s_i(4n, 7n, 0n, 0n, 1n, 0n, 0n, q6s_i(3n, 7n, 0n, 0n, 1n, 0n, 0n, q6s_i(2n, 7n, 0n, 0n, 1n, 0n, 0n, q6s_i(1n, 7n, 0n, 0n, 1n, 0n, 0n, q6s_i(0n, 7n, 0n, 0n, 1n, 0n, 0n, {==}, sh_0_0_1_0_0_0()), sh_0_0_1_0_0_1()), sh_0_0_1_0_0_2()), sh_0_0_1_0_0_3()), sh_0_0_1_0_0_4()), sh_0_0_1_0_0_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 0n, 1n, q6s_i(4n, 7n, 0n, 0n, 1n, 0n, 1n, q6s_i(3n, 7n, 0n, 0n, 1n, 0n, 1n, q6s_i(2n, 7n, 0n, 0n, 1n, 0n, 1n, q6s_i(1n, 7n, 0n, 0n, 1n, 0n, 1n, q6s_i(0n, 7n, 0n, 0n, 1n, 0n, 1n, {==}, sh_0_0_1_0_1_0()), sh_0_0_1_0_1_1()), sh_0_0_1_0_1_2()), sh_0_0_1_0_1_3()), sh_0_0_1_0_1_4()), sh_0_0_1_0_1_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 0n, 2n, q6s_i(4n, 7n, 0n, 0n, 1n, 0n, 2n, q6s_i(3n, 7n, 0n, 0n, 1n, 0n, 2n, q6s_i(2n, 7n, 0n, 0n, 1n, 0n, 2n, q6s_i(1n, 7n, 0n, 0n, 1n, 0n, 2n, q6s_i(0n, 7n, 0n, 0n, 1n, 0n, 2n, {==}, sh_0_0_1_0_2_0()), sh_0_0_1_0_2_1()), sh_0_0_1_0_2_2()), sh_0_0_1_0_2_3()), sh_0_0_1_0_2_4()), sh_0_0_1_0_2_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 0n, 3n, q6s_i(4n, 7n, 0n, 0n, 1n, 0n, 3n, q6s_i(3n, 7n, 0n, 0n, 1n, 0n, 3n, q6s_i(2n, 7n, 0n, 0n, 1n, 0n, 3n, q6s_i(1n, 7n, 0n, 0n, 1n, 0n, 3n, q6s_i(0n, 7n, 0n, 0n, 1n, 0n, 3n, {==}, sh_0_0_1_0_3_0()), sh_0_0_1_0_3_1()), sh_0_0_1_0_3_2()), sh_0_0_1_0_3_3()), sh_0_0_1_0_3_4()), sh_0_0_1_0_3_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 0n, 4n, q6s_i(4n, 7n, 0n, 0n, 1n, 0n, 4n, q6s_i(3n, 7n, 0n, 0n, 1n, 0n, 4n, q6s_i(2n, 7n, 0n, 0n, 1n, 0n, 4n, q6s_i(1n, 7n, 0n, 0n, 1n, 0n, 4n, q6s_i(0n, 7n, 0n, 0n, 1n, 0n, 4n, {==}, sh_0_0_1_0_4_0()), sh_0_0_1_0_4_1()), sh_0_0_1_0_4_2()), sh_0_0_1_0_4_3()), sh_0_0_1_0_4_4()), sh_0_0_1_0_4_5()))
+
+def sq5_0_0_1_1() -> {q5s(5n, 6n, 7n, 0n, 0n, 1n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 1n, 1n, q5s_i(3n, 6n, 7n, 0n, 0n, 1n, 1n, q5s_i(2n, 6n, 7n, 0n, 0n, 1n, 1n, q5s_i(1n, 6n, 7n, 0n, 0n, 1n, 1n, q5s_i(0n, 6n, 7n, 0n, 0n, 1n, 1n, {==}, q6s_i(5n, 7n, 0n, 0n, 1n, 1n, 0n, q6s_i(4n, 7n, 0n, 0n, 1n, 1n, 0n, q6s_i(3n, 7n, 0n, 0n, 1n, 1n, 0n, q6s_i(2n, 7n, 0n, 0n, 1n, 1n, 0n, q6s_i(1n, 7n, 0n, 0n, 1n, 1n, 0n, q6s_i(0n, 7n, 0n, 0n, 1n, 1n, 0n, {==}, sh_0_0_1_1_0_0()), sh_0_0_1_1_0_1()), sh_0_0_1_1_0_2()), sh_0_0_1_1_0_3()), sh_0_0_1_1_0_4()), sh_0_0_1_1_0_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 1n, 1n, q6s_i(4n, 7n, 0n, 0n, 1n, 1n, 1n, q6s_i(3n, 7n, 0n, 0n, 1n, 1n, 1n, q6s_i(2n, 7n, 0n, 0n, 1n, 1n, 1n, q6s_i(1n, 7n, 0n, 0n, 1n, 1n, 1n, q6s_i(0n, 7n, 0n, 0n, 1n, 1n, 1n, {==}, sh_0_0_1_1_1_0()), sh_0_0_1_1_1_1()), sh_0_0_1_1_1_2()), sh_0_0_1_1_1_3()), sh_0_0_1_1_1_4()), sh_0_0_1_1_1_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 1n, 2n, q6s_i(4n, 7n, 0n, 0n, 1n, 1n, 2n, q6s_i(3n, 7n, 0n, 0n, 1n, 1n, 2n, q6s_i(2n, 7n, 0n, 0n, 1n, 1n, 2n, q6s_i(1n, 7n, 0n, 0n, 1n, 1n, 2n, q6s_i(0n, 7n, 0n, 0n, 1n, 1n, 2n, {==}, sh_0_0_1_1_2_0()), sh_0_0_1_1_2_1()), sh_0_0_1_1_2_2()), sh_0_0_1_1_2_3()), sh_0_0_1_1_2_4()), sh_0_0_1_1_2_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 1n, 3n, q6s_i(4n, 7n, 0n, 0n, 1n, 1n, 3n, q6s_i(3n, 7n, 0n, 0n, 1n, 1n, 3n, q6s_i(2n, 7n, 0n, 0n, 1n, 1n, 3n, q6s_i(1n, 7n, 0n, 0n, 1n, 1n, 3n, q6s_i(0n, 7n, 0n, 0n, 1n, 1n, 3n, {==}, sh_0_0_1_1_3_0()), sh_0_0_1_1_3_1()), sh_0_0_1_1_3_2()), sh_0_0_1_1_3_3()), sh_0_0_1_1_3_4()), sh_0_0_1_1_3_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 1n, 4n, q6s_i(4n, 7n, 0n, 0n, 1n, 1n, 4n, q6s_i(3n, 7n, 0n, 0n, 1n, 1n, 4n, q6s_i(2n, 7n, 0n, 0n, 1n, 1n, 4n, q6s_i(1n, 7n, 0n, 0n, 1n, 1n, 4n, q6s_i(0n, 7n, 0n, 0n, 1n, 1n, 4n, {==}, sh_0_0_1_1_4_0()), sh_0_0_1_1_4_1()), sh_0_0_1_1_4_2()), sh_0_0_1_1_4_3()), sh_0_0_1_1_4_4()), sh_0_0_1_1_4_5()))
+
+def sq5_0_0_1_2() -> {q5s(5n, 6n, 7n, 0n, 0n, 1n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 1n, 2n, q5s_i(3n, 6n, 7n, 0n, 0n, 1n, 2n, q5s_i(2n, 6n, 7n, 0n, 0n, 1n, 2n, q5s_i(1n, 6n, 7n, 0n, 0n, 1n, 2n, q5s_i(0n, 6n, 7n, 0n, 0n, 1n, 2n, {==}, q6s_i(5n, 7n, 0n, 0n, 1n, 2n, 0n, q6s_i(4n, 7n, 0n, 0n, 1n, 2n, 0n, q6s_i(3n, 7n, 0n, 0n, 1n, 2n, 0n, q6s_i(2n, 7n, 0n, 0n, 1n, 2n, 0n, q6s_i(1n, 7n, 0n, 0n, 1n, 2n, 0n, q6s_i(0n, 7n, 0n, 0n, 1n, 2n, 0n, {==}, sh_0_0_1_2_0_0()), sh_0_0_1_2_0_1()), sh_0_0_1_2_0_2()), sh_0_0_1_2_0_3()), sh_0_0_1_2_0_4()), sh_0_0_1_2_0_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 2n, 1n, q6s_i(4n, 7n, 0n, 0n, 1n, 2n, 1n, q6s_i(3n, 7n, 0n, 0n, 1n, 2n, 1n, q6s_i(2n, 7n, 0n, 0n, 1n, 2n, 1n, q6s_i(1n, 7n, 0n, 0n, 1n, 2n, 1n, q6s_i(0n, 7n, 0n, 0n, 1n, 2n, 1n, {==}, sh_0_0_1_2_1_0()), sh_0_0_1_2_1_1()), sh_0_0_1_2_1_2()), sh_0_0_1_2_1_3()), sh_0_0_1_2_1_4()), sh_0_0_1_2_1_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 2n, 2n, q6s_i(4n, 7n, 0n, 0n, 1n, 2n, 2n, q6s_i(3n, 7n, 0n, 0n, 1n, 2n, 2n, q6s_i(2n, 7n, 0n, 0n, 1n, 2n, 2n, q6s_i(1n, 7n, 0n, 0n, 1n, 2n, 2n, q6s_i(0n, 7n, 0n, 0n, 1n, 2n, 2n, {==}, sh_0_0_1_2_2_0()), sh_0_0_1_2_2_1()), sh_0_0_1_2_2_2()), sh_0_0_1_2_2_3()), sh_0_0_1_2_2_4()), sh_0_0_1_2_2_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 2n, 3n, q6s_i(4n, 7n, 0n, 0n, 1n, 2n, 3n, q6s_i(3n, 7n, 0n, 0n, 1n, 2n, 3n, q6s_i(2n, 7n, 0n, 0n, 1n, 2n, 3n, q6s_i(1n, 7n, 0n, 0n, 1n, 2n, 3n, q6s_i(0n, 7n, 0n, 0n, 1n, 2n, 3n, {==}, sh_0_0_1_2_3_0()), sh_0_0_1_2_3_1()), sh_0_0_1_2_3_2()), sh_0_0_1_2_3_3()), sh_0_0_1_2_3_4()), sh_0_0_1_2_3_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 2n, 4n, q6s_i(4n, 7n, 0n, 0n, 1n, 2n, 4n, q6s_i(3n, 7n, 0n, 0n, 1n, 2n, 4n, q6s_i(2n, 7n, 0n, 0n, 1n, 2n, 4n, q6s_i(1n, 7n, 0n, 0n, 1n, 2n, 4n, q6s_i(0n, 7n, 0n, 0n, 1n, 2n, 4n, {==}, sh_0_0_1_2_4_0()), sh_0_0_1_2_4_1()), sh_0_0_1_2_4_2()), sh_0_0_1_2_4_3()), sh_0_0_1_2_4_4()), sh_0_0_1_2_4_5()))
+
+def sq5_0_0_1_3() -> {q5s(5n, 6n, 7n, 0n, 0n, 1n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 1n, 3n, q5s_i(3n, 6n, 7n, 0n, 0n, 1n, 3n, q5s_i(2n, 6n, 7n, 0n, 0n, 1n, 3n, q5s_i(1n, 6n, 7n, 0n, 0n, 1n, 3n, q5s_i(0n, 6n, 7n, 0n, 0n, 1n, 3n, {==}, q6s_i(5n, 7n, 0n, 0n, 1n, 3n, 0n, q6s_i(4n, 7n, 0n, 0n, 1n, 3n, 0n, q6s_i(3n, 7n, 0n, 0n, 1n, 3n, 0n, q6s_i(2n, 7n, 0n, 0n, 1n, 3n, 0n, q6s_i(1n, 7n, 0n, 0n, 1n, 3n, 0n, q6s_i(0n, 7n, 0n, 0n, 1n, 3n, 0n, {==}, sh_0_0_1_3_0_0()), sh_0_0_1_3_0_1()), sh_0_0_1_3_0_2()), sh_0_0_1_3_0_3()), sh_0_0_1_3_0_4()), sh_0_0_1_3_0_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 3n, 1n, q6s_i(4n, 7n, 0n, 0n, 1n, 3n, 1n, q6s_i(3n, 7n, 0n, 0n, 1n, 3n, 1n, q6s_i(2n, 7n, 0n, 0n, 1n, 3n, 1n, q6s_i(1n, 7n, 0n, 0n, 1n, 3n, 1n, q6s_i(0n, 7n, 0n, 0n, 1n, 3n, 1n, {==}, sh_0_0_1_3_1_0()), sh_0_0_1_3_1_1()), sh_0_0_1_3_1_2()), sh_0_0_1_3_1_3()), sh_0_0_1_3_1_4()), sh_0_0_1_3_1_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 3n, 2n, q6s_i(4n, 7n, 0n, 0n, 1n, 3n, 2n, q6s_i(3n, 7n, 0n, 0n, 1n, 3n, 2n, q6s_i(2n, 7n, 0n, 0n, 1n, 3n, 2n, q6s_i(1n, 7n, 0n, 0n, 1n, 3n, 2n, q6s_i(0n, 7n, 0n, 0n, 1n, 3n, 2n, {==}, sh_0_0_1_3_2_0()), sh_0_0_1_3_2_1()), sh_0_0_1_3_2_2()), sh_0_0_1_3_2_3()), sh_0_0_1_3_2_4()), sh_0_0_1_3_2_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 3n, 3n, q6s_i(4n, 7n, 0n, 0n, 1n, 3n, 3n, q6s_i(3n, 7n, 0n, 0n, 1n, 3n, 3n, q6s_i(2n, 7n, 0n, 0n, 1n, 3n, 3n, q6s_i(1n, 7n, 0n, 0n, 1n, 3n, 3n, q6s_i(0n, 7n, 0n, 0n, 1n, 3n, 3n, {==}, sh_0_0_1_3_3_0()), sh_0_0_1_3_3_1()), sh_0_0_1_3_3_2()), sh_0_0_1_3_3_3()), sh_0_0_1_3_3_4()), sh_0_0_1_3_3_5())), q6s_i(5n, 7n, 0n, 0n, 1n, 3n, 4n, q6s_i(4n, 7n, 0n, 0n, 1n, 3n, 4n, q6s_i(3n, 7n, 0n, 0n, 1n, 3n, 4n, q6s_i(2n, 7n, 0n, 0n, 1n, 3n, 4n, q6s_i(1n, 7n, 0n, 0n, 1n, 3n, 4n, q6s_i(0n, 7n, 0n, 0n, 1n, 3n, 4n, {==}, sh_0_0_1_3_4_0()), sh_0_0_1_3_4_1()), sh_0_0_1_3_4_2()), sh_0_0_1_3_4_3()), sh_0_0_1_3_4_4()), sh_0_0_1_3_4_5()))
+
+def sq5_0_0_2_0() -> {q5s(5n, 6n, 7n, 0n, 0n, 2n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 2n, 0n, q5s_i(3n, 6n, 7n, 0n, 0n, 2n, 0n, q5s_i(2n, 6n, 7n, 0n, 0n, 2n, 0n, q5s_i(1n, 6n, 7n, 0n, 0n, 2n, 0n, q5s_i(0n, 6n, 7n, 0n, 0n, 2n, 0n, {==}, q6s_i(5n, 7n, 0n, 0n, 2n, 0n, 0n, q6s_i(4n, 7n, 0n, 0n, 2n, 0n, 0n, q6s_i(3n, 7n, 0n, 0n, 2n, 0n, 0n, q6s_i(2n, 7n, 0n, 0n, 2n, 0n, 0n, q6s_i(1n, 7n, 0n, 0n, 2n, 0n, 0n, q6s_i(0n, 7n, 0n, 0n, 2n, 0n, 0n, {==}, sh_0_0_2_0_0_0()), sh_0_0_2_0_0_1()), sh_0_0_2_0_0_2()), sh_0_0_2_0_0_3()), sh_0_0_2_0_0_4()), sh_0_0_2_0_0_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 0n, 1n, q6s_i(4n, 7n, 0n, 0n, 2n, 0n, 1n, q6s_i(3n, 7n, 0n, 0n, 2n, 0n, 1n, q6s_i(2n, 7n, 0n, 0n, 2n, 0n, 1n, q6s_i(1n, 7n, 0n, 0n, 2n, 0n, 1n, q6s_i(0n, 7n, 0n, 0n, 2n, 0n, 1n, {==}, sh_0_0_2_0_1_0()), sh_0_0_2_0_1_1()), sh_0_0_2_0_1_2()), sh_0_0_2_0_1_3()), sh_0_0_2_0_1_4()), sh_0_0_2_0_1_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 0n, 2n, q6s_i(4n, 7n, 0n, 0n, 2n, 0n, 2n, q6s_i(3n, 7n, 0n, 0n, 2n, 0n, 2n, q6s_i(2n, 7n, 0n, 0n, 2n, 0n, 2n, q6s_i(1n, 7n, 0n, 0n, 2n, 0n, 2n, q6s_i(0n, 7n, 0n, 0n, 2n, 0n, 2n, {==}, sh_0_0_2_0_2_0()), sh_0_0_2_0_2_1()), sh_0_0_2_0_2_2()), sh_0_0_2_0_2_3()), sh_0_0_2_0_2_4()), sh_0_0_2_0_2_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 0n, 3n, q6s_i(4n, 7n, 0n, 0n, 2n, 0n, 3n, q6s_i(3n, 7n, 0n, 0n, 2n, 0n, 3n, q6s_i(2n, 7n, 0n, 0n, 2n, 0n, 3n, q6s_i(1n, 7n, 0n, 0n, 2n, 0n, 3n, q6s_i(0n, 7n, 0n, 0n, 2n, 0n, 3n, {==}, sh_0_0_2_0_3_0()), sh_0_0_2_0_3_1()), sh_0_0_2_0_3_2()), sh_0_0_2_0_3_3()), sh_0_0_2_0_3_4()), sh_0_0_2_0_3_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 0n, 4n, q6s_i(4n, 7n, 0n, 0n, 2n, 0n, 4n, q6s_i(3n, 7n, 0n, 0n, 2n, 0n, 4n, q6s_i(2n, 7n, 0n, 0n, 2n, 0n, 4n, q6s_i(1n, 7n, 0n, 0n, 2n, 0n, 4n, q6s_i(0n, 7n, 0n, 0n, 2n, 0n, 4n, {==}, sh_0_0_2_0_4_0()), sh_0_0_2_0_4_1()), sh_0_0_2_0_4_2()), sh_0_0_2_0_4_3()), sh_0_0_2_0_4_4()), sh_0_0_2_0_4_5()))
+
+def sq5_0_0_2_1() -> {q5s(5n, 6n, 7n, 0n, 0n, 2n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 2n, 1n, q5s_i(3n, 6n, 7n, 0n, 0n, 2n, 1n, q5s_i(2n, 6n, 7n, 0n, 0n, 2n, 1n, q5s_i(1n, 6n, 7n, 0n, 0n, 2n, 1n, q5s_i(0n, 6n, 7n, 0n, 0n, 2n, 1n, {==}, q6s_i(5n, 7n, 0n, 0n, 2n, 1n, 0n, q6s_i(4n, 7n, 0n, 0n, 2n, 1n, 0n, q6s_i(3n, 7n, 0n, 0n, 2n, 1n, 0n, q6s_i(2n, 7n, 0n, 0n, 2n, 1n, 0n, q6s_i(1n, 7n, 0n, 0n, 2n, 1n, 0n, q6s_i(0n, 7n, 0n, 0n, 2n, 1n, 0n, {==}, sh_0_0_2_1_0_0()), sh_0_0_2_1_0_1()), sh_0_0_2_1_0_2()), sh_0_0_2_1_0_3()), sh_0_0_2_1_0_4()), sh_0_0_2_1_0_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 1n, 1n, q6s_i(4n, 7n, 0n, 0n, 2n, 1n, 1n, q6s_i(3n, 7n, 0n, 0n, 2n, 1n, 1n, q6s_i(2n, 7n, 0n, 0n, 2n, 1n, 1n, q6s_i(1n, 7n, 0n, 0n, 2n, 1n, 1n, q6s_i(0n, 7n, 0n, 0n, 2n, 1n, 1n, {==}, sh_0_0_2_1_1_0()), sh_0_0_2_1_1_1()), sh_0_0_2_1_1_2()), sh_0_0_2_1_1_3()), sh_0_0_2_1_1_4()), sh_0_0_2_1_1_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 1n, 2n, q6s_i(4n, 7n, 0n, 0n, 2n, 1n, 2n, q6s_i(3n, 7n, 0n, 0n, 2n, 1n, 2n, q6s_i(2n, 7n, 0n, 0n, 2n, 1n, 2n, q6s_i(1n, 7n, 0n, 0n, 2n, 1n, 2n, q6s_i(0n, 7n, 0n, 0n, 2n, 1n, 2n, {==}, sh_0_0_2_1_2_0()), sh_0_0_2_1_2_1()), sh_0_0_2_1_2_2()), sh_0_0_2_1_2_3()), sh_0_0_2_1_2_4()), sh_0_0_2_1_2_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 1n, 3n, q6s_i(4n, 7n, 0n, 0n, 2n, 1n, 3n, q6s_i(3n, 7n, 0n, 0n, 2n, 1n, 3n, q6s_i(2n, 7n, 0n, 0n, 2n, 1n, 3n, q6s_i(1n, 7n, 0n, 0n, 2n, 1n, 3n, q6s_i(0n, 7n, 0n, 0n, 2n, 1n, 3n, {==}, sh_0_0_2_1_3_0()), sh_0_0_2_1_3_1()), sh_0_0_2_1_3_2()), sh_0_0_2_1_3_3()), sh_0_0_2_1_3_4()), sh_0_0_2_1_3_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 1n, 4n, q6s_i(4n, 7n, 0n, 0n, 2n, 1n, 4n, q6s_i(3n, 7n, 0n, 0n, 2n, 1n, 4n, q6s_i(2n, 7n, 0n, 0n, 2n, 1n, 4n, q6s_i(1n, 7n, 0n, 0n, 2n, 1n, 4n, q6s_i(0n, 7n, 0n, 0n, 2n, 1n, 4n, {==}, sh_0_0_2_1_4_0()), sh_0_0_2_1_4_1()), sh_0_0_2_1_4_2()), sh_0_0_2_1_4_3()), sh_0_0_2_1_4_4()), sh_0_0_2_1_4_5()))
+
+def sq5_0_0_2_2() -> {q5s(5n, 6n, 7n, 0n, 0n, 2n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 2n, 2n, q5s_i(3n, 6n, 7n, 0n, 0n, 2n, 2n, q5s_i(2n, 6n, 7n, 0n, 0n, 2n, 2n, q5s_i(1n, 6n, 7n, 0n, 0n, 2n, 2n, q5s_i(0n, 6n, 7n, 0n, 0n, 2n, 2n, {==}, q6s_i(5n, 7n, 0n, 0n, 2n, 2n, 0n, q6s_i(4n, 7n, 0n, 0n, 2n, 2n, 0n, q6s_i(3n, 7n, 0n, 0n, 2n, 2n, 0n, q6s_i(2n, 7n, 0n, 0n, 2n, 2n, 0n, q6s_i(1n, 7n, 0n, 0n, 2n, 2n, 0n, q6s_i(0n, 7n, 0n, 0n, 2n, 2n, 0n, {==}, sh_0_0_2_2_0_0()), sh_0_0_2_2_0_1()), sh_0_0_2_2_0_2()), sh_0_0_2_2_0_3()), sh_0_0_2_2_0_4()), sh_0_0_2_2_0_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 2n, 1n, q6s_i(4n, 7n, 0n, 0n, 2n, 2n, 1n, q6s_i(3n, 7n, 0n, 0n, 2n, 2n, 1n, q6s_i(2n, 7n, 0n, 0n, 2n, 2n, 1n, q6s_i(1n, 7n, 0n, 0n, 2n, 2n, 1n, q6s_i(0n, 7n, 0n, 0n, 2n, 2n, 1n, {==}, sh_0_0_2_2_1_0()), sh_0_0_2_2_1_1()), sh_0_0_2_2_1_2()), sh_0_0_2_2_1_3()), sh_0_0_2_2_1_4()), sh_0_0_2_2_1_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 2n, 2n, q6s_i(4n, 7n, 0n, 0n, 2n, 2n, 2n, q6s_i(3n, 7n, 0n, 0n, 2n, 2n, 2n, q6s_i(2n, 7n, 0n, 0n, 2n, 2n, 2n, q6s_i(1n, 7n, 0n, 0n, 2n, 2n, 2n, q6s_i(0n, 7n, 0n, 0n, 2n, 2n, 2n, {==}, sh_0_0_2_2_2_0()), sh_0_0_2_2_2_1()), sh_0_0_2_2_2_2()), sh_0_0_2_2_2_3()), sh_0_0_2_2_2_4()), sh_0_0_2_2_2_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 2n, 3n, q6s_i(4n, 7n, 0n, 0n, 2n, 2n, 3n, q6s_i(3n, 7n, 0n, 0n, 2n, 2n, 3n, q6s_i(2n, 7n, 0n, 0n, 2n, 2n, 3n, q6s_i(1n, 7n, 0n, 0n, 2n, 2n, 3n, q6s_i(0n, 7n, 0n, 0n, 2n, 2n, 3n, {==}, sh_0_0_2_2_3_0()), sh_0_0_2_2_3_1()), sh_0_0_2_2_3_2()), sh_0_0_2_2_3_3()), sh_0_0_2_2_3_4()), sh_0_0_2_2_3_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 2n, 4n, q6s_i(4n, 7n, 0n, 0n, 2n, 2n, 4n, q6s_i(3n, 7n, 0n, 0n, 2n, 2n, 4n, q6s_i(2n, 7n, 0n, 0n, 2n, 2n, 4n, q6s_i(1n, 7n, 0n, 0n, 2n, 2n, 4n, q6s_i(0n, 7n, 0n, 0n, 2n, 2n, 4n, {==}, sh_0_0_2_2_4_0()), sh_0_0_2_2_4_1()), sh_0_0_2_2_4_2()), sh_0_0_2_2_4_3()), sh_0_0_2_2_4_4()), sh_0_0_2_2_4_5()))
+
+def sq5_0_0_2_3() -> {q5s(5n, 6n, 7n, 0n, 0n, 2n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 0n, 2n, 3n, q5s_i(3n, 6n, 7n, 0n, 0n, 2n, 3n, q5s_i(2n, 6n, 7n, 0n, 0n, 2n, 3n, q5s_i(1n, 6n, 7n, 0n, 0n, 2n, 3n, q5s_i(0n, 6n, 7n, 0n, 0n, 2n, 3n, {==}, q6s_i(5n, 7n, 0n, 0n, 2n, 3n, 0n, q6s_i(4n, 7n, 0n, 0n, 2n, 3n, 0n, q6s_i(3n, 7n, 0n, 0n, 2n, 3n, 0n, q6s_i(2n, 7n, 0n, 0n, 2n, 3n, 0n, q6s_i(1n, 7n, 0n, 0n, 2n, 3n, 0n, q6s_i(0n, 7n, 0n, 0n, 2n, 3n, 0n, {==}, sh_0_0_2_3_0_0()), sh_0_0_2_3_0_1()), sh_0_0_2_3_0_2()), sh_0_0_2_3_0_3()), sh_0_0_2_3_0_4()), sh_0_0_2_3_0_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 3n, 1n, q6s_i(4n, 7n, 0n, 0n, 2n, 3n, 1n, q6s_i(3n, 7n, 0n, 0n, 2n, 3n, 1n, q6s_i(2n, 7n, 0n, 0n, 2n, 3n, 1n, q6s_i(1n, 7n, 0n, 0n, 2n, 3n, 1n, q6s_i(0n, 7n, 0n, 0n, 2n, 3n, 1n, {==}, sh_0_0_2_3_1_0()), sh_0_0_2_3_1_1()), sh_0_0_2_3_1_2()), sh_0_0_2_3_1_3()), sh_0_0_2_3_1_4()), sh_0_0_2_3_1_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 3n, 2n, q6s_i(4n, 7n, 0n, 0n, 2n, 3n, 2n, q6s_i(3n, 7n, 0n, 0n, 2n, 3n, 2n, q6s_i(2n, 7n, 0n, 0n, 2n, 3n, 2n, q6s_i(1n, 7n, 0n, 0n, 2n, 3n, 2n, q6s_i(0n, 7n, 0n, 0n, 2n, 3n, 2n, {==}, sh_0_0_2_3_2_0()), sh_0_0_2_3_2_1()), sh_0_0_2_3_2_2()), sh_0_0_2_3_2_3()), sh_0_0_2_3_2_4()), sh_0_0_2_3_2_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 3n, 3n, q6s_i(4n, 7n, 0n, 0n, 2n, 3n, 3n, q6s_i(3n, 7n, 0n, 0n, 2n, 3n, 3n, q6s_i(2n, 7n, 0n, 0n, 2n, 3n, 3n, q6s_i(1n, 7n, 0n, 0n, 2n, 3n, 3n, q6s_i(0n, 7n, 0n, 0n, 2n, 3n, 3n, {==}, sh_0_0_2_3_3_0()), sh_0_0_2_3_3_1()), sh_0_0_2_3_3_2()), sh_0_0_2_3_3_3()), sh_0_0_2_3_3_4()), sh_0_0_2_3_3_5())), q6s_i(5n, 7n, 0n, 0n, 2n, 3n, 4n, q6s_i(4n, 7n, 0n, 0n, 2n, 3n, 4n, q6s_i(3n, 7n, 0n, 0n, 2n, 3n, 4n, q6s_i(2n, 7n, 0n, 0n, 2n, 3n, 4n, q6s_i(1n, 7n, 0n, 0n, 2n, 3n, 4n, q6s_i(0n, 7n, 0n, 0n, 2n, 3n, 4n, {==}, sh_0_0_2_3_4_0()), sh_0_0_2_3_4_1()), sh_0_0_2_3_4_2()), sh_0_0_2_3_4_3()), sh_0_0_2_3_4_4()), sh_0_0_2_3_4_5()))
+
+def sq5_0_1_0_0() -> {q5s(5n, 6n, 7n, 0n, 1n, 0n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 0n, 0n, q5s_i(3n, 6n, 7n, 0n, 1n, 0n, 0n, q5s_i(2n, 6n, 7n, 0n, 1n, 0n, 0n, q5s_i(1n, 6n, 7n, 0n, 1n, 0n, 0n, q5s_i(0n, 6n, 7n, 0n, 1n, 0n, 0n, {==}, q6s_i(5n, 7n, 0n, 1n, 0n, 0n, 0n, q6s_i(4n, 7n, 0n, 1n, 0n, 0n, 0n, q6s_i(3n, 7n, 0n, 1n, 0n, 0n, 0n, q6s_i(2n, 7n, 0n, 1n, 0n, 0n, 0n, q6s_i(1n, 7n, 0n, 1n, 0n, 0n, 0n, q6s_i(0n, 7n, 0n, 1n, 0n, 0n, 0n, {==}, sh_0_1_0_0_0_0()), sh_0_1_0_0_0_1()), sh_0_1_0_0_0_2()), sh_0_1_0_0_0_3()), sh_0_1_0_0_0_4()), sh_0_1_0_0_0_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 0n, 1n, q6s_i(4n, 7n, 0n, 1n, 0n, 0n, 1n, q6s_i(3n, 7n, 0n, 1n, 0n, 0n, 1n, q6s_i(2n, 7n, 0n, 1n, 0n, 0n, 1n, q6s_i(1n, 7n, 0n, 1n, 0n, 0n, 1n, q6s_i(0n, 7n, 0n, 1n, 0n, 0n, 1n, {==}, sh_0_1_0_0_1_0()), sh_0_1_0_0_1_1()), sh_0_1_0_0_1_2()), sh_0_1_0_0_1_3()), sh_0_1_0_0_1_4()), sh_0_1_0_0_1_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 0n, 2n, q6s_i(4n, 7n, 0n, 1n, 0n, 0n, 2n, q6s_i(3n, 7n, 0n, 1n, 0n, 0n, 2n, q6s_i(2n, 7n, 0n, 1n, 0n, 0n, 2n, q6s_i(1n, 7n, 0n, 1n, 0n, 0n, 2n, q6s_i(0n, 7n, 0n, 1n, 0n, 0n, 2n, {==}, sh_0_1_0_0_2_0()), sh_0_1_0_0_2_1()), sh_0_1_0_0_2_2()), sh_0_1_0_0_2_3()), sh_0_1_0_0_2_4()), sh_0_1_0_0_2_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 0n, 3n, q6s_i(4n, 7n, 0n, 1n, 0n, 0n, 3n, q6s_i(3n, 7n, 0n, 1n, 0n, 0n, 3n, q6s_i(2n, 7n, 0n, 1n, 0n, 0n, 3n, q6s_i(1n, 7n, 0n, 1n, 0n, 0n, 3n, q6s_i(0n, 7n, 0n, 1n, 0n, 0n, 3n, {==}, sh_0_1_0_0_3_0()), sh_0_1_0_0_3_1()), sh_0_1_0_0_3_2()), sh_0_1_0_0_3_3()), sh_0_1_0_0_3_4()), sh_0_1_0_0_3_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 0n, 4n, q6s_i(4n, 7n, 0n, 1n, 0n, 0n, 4n, q6s_i(3n, 7n, 0n, 1n, 0n, 0n, 4n, q6s_i(2n, 7n, 0n, 1n, 0n, 0n, 4n, q6s_i(1n, 7n, 0n, 1n, 0n, 0n, 4n, q6s_i(0n, 7n, 0n, 1n, 0n, 0n, 4n, {==}, sh_0_1_0_0_4_0()), sh_0_1_0_0_4_1()), sh_0_1_0_0_4_2()), sh_0_1_0_0_4_3()), sh_0_1_0_0_4_4()), sh_0_1_0_0_4_5()))
+
+def sq5_0_1_0_1() -> {q5s(5n, 6n, 7n, 0n, 1n, 0n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 0n, 1n, q5s_i(3n, 6n, 7n, 0n, 1n, 0n, 1n, q5s_i(2n, 6n, 7n, 0n, 1n, 0n, 1n, q5s_i(1n, 6n, 7n, 0n, 1n, 0n, 1n, q5s_i(0n, 6n, 7n, 0n, 1n, 0n, 1n, {==}, q6s_i(5n, 7n, 0n, 1n, 0n, 1n, 0n, q6s_i(4n, 7n, 0n, 1n, 0n, 1n, 0n, q6s_i(3n, 7n, 0n, 1n, 0n, 1n, 0n, q6s_i(2n, 7n, 0n, 1n, 0n, 1n, 0n, q6s_i(1n, 7n, 0n, 1n, 0n, 1n, 0n, q6s_i(0n, 7n, 0n, 1n, 0n, 1n, 0n, {==}, sh_0_1_0_1_0_0()), sh_0_1_0_1_0_1()), sh_0_1_0_1_0_2()), sh_0_1_0_1_0_3()), sh_0_1_0_1_0_4()), sh_0_1_0_1_0_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 1n, 1n, q6s_i(4n, 7n, 0n, 1n, 0n, 1n, 1n, q6s_i(3n, 7n, 0n, 1n, 0n, 1n, 1n, q6s_i(2n, 7n, 0n, 1n, 0n, 1n, 1n, q6s_i(1n, 7n, 0n, 1n, 0n, 1n, 1n, q6s_i(0n, 7n, 0n, 1n, 0n, 1n, 1n, {==}, sh_0_1_0_1_1_0()), sh_0_1_0_1_1_1()), sh_0_1_0_1_1_2()), sh_0_1_0_1_1_3()), sh_0_1_0_1_1_4()), sh_0_1_0_1_1_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 1n, 2n, q6s_i(4n, 7n, 0n, 1n, 0n, 1n, 2n, q6s_i(3n, 7n, 0n, 1n, 0n, 1n, 2n, q6s_i(2n, 7n, 0n, 1n, 0n, 1n, 2n, q6s_i(1n, 7n, 0n, 1n, 0n, 1n, 2n, q6s_i(0n, 7n, 0n, 1n, 0n, 1n, 2n, {==}, sh_0_1_0_1_2_0()), sh_0_1_0_1_2_1()), sh_0_1_0_1_2_2()), sh_0_1_0_1_2_3()), sh_0_1_0_1_2_4()), sh_0_1_0_1_2_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 1n, 3n, q6s_i(4n, 7n, 0n, 1n, 0n, 1n, 3n, q6s_i(3n, 7n, 0n, 1n, 0n, 1n, 3n, q6s_i(2n, 7n, 0n, 1n, 0n, 1n, 3n, q6s_i(1n, 7n, 0n, 1n, 0n, 1n, 3n, q6s_i(0n, 7n, 0n, 1n, 0n, 1n, 3n, {==}, sh_0_1_0_1_3_0()), sh_0_1_0_1_3_1()), sh_0_1_0_1_3_2()), sh_0_1_0_1_3_3()), sh_0_1_0_1_3_4()), sh_0_1_0_1_3_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 1n, 4n, q6s_i(4n, 7n, 0n, 1n, 0n, 1n, 4n, q6s_i(3n, 7n, 0n, 1n, 0n, 1n, 4n, q6s_i(2n, 7n, 0n, 1n, 0n, 1n, 4n, q6s_i(1n, 7n, 0n, 1n, 0n, 1n, 4n, q6s_i(0n, 7n, 0n, 1n, 0n, 1n, 4n, {==}, sh_0_1_0_1_4_0()), sh_0_1_0_1_4_1()), sh_0_1_0_1_4_2()), sh_0_1_0_1_4_3()), sh_0_1_0_1_4_4()), sh_0_1_0_1_4_5()))
+
+def sq5_0_1_0_2() -> {q5s(5n, 6n, 7n, 0n, 1n, 0n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 0n, 2n, q5s_i(3n, 6n, 7n, 0n, 1n, 0n, 2n, q5s_i(2n, 6n, 7n, 0n, 1n, 0n, 2n, q5s_i(1n, 6n, 7n, 0n, 1n, 0n, 2n, q5s_i(0n, 6n, 7n, 0n, 1n, 0n, 2n, {==}, q6s_i(5n, 7n, 0n, 1n, 0n, 2n, 0n, q6s_i(4n, 7n, 0n, 1n, 0n, 2n, 0n, q6s_i(3n, 7n, 0n, 1n, 0n, 2n, 0n, q6s_i(2n, 7n, 0n, 1n, 0n, 2n, 0n, q6s_i(1n, 7n, 0n, 1n, 0n, 2n, 0n, q6s_i(0n, 7n, 0n, 1n, 0n, 2n, 0n, {==}, sh_0_1_0_2_0_0()), sh_0_1_0_2_0_1()), sh_0_1_0_2_0_2()), sh_0_1_0_2_0_3()), sh_0_1_0_2_0_4()), sh_0_1_0_2_0_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 2n, 1n, q6s_i(4n, 7n, 0n, 1n, 0n, 2n, 1n, q6s_i(3n, 7n, 0n, 1n, 0n, 2n, 1n, q6s_i(2n, 7n, 0n, 1n, 0n, 2n, 1n, q6s_i(1n, 7n, 0n, 1n, 0n, 2n, 1n, q6s_i(0n, 7n, 0n, 1n, 0n, 2n, 1n, {==}, sh_0_1_0_2_1_0()), sh_0_1_0_2_1_1()), sh_0_1_0_2_1_2()), sh_0_1_0_2_1_3()), sh_0_1_0_2_1_4()), sh_0_1_0_2_1_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 2n, 2n, q6s_i(4n, 7n, 0n, 1n, 0n, 2n, 2n, q6s_i(3n, 7n, 0n, 1n, 0n, 2n, 2n, q6s_i(2n, 7n, 0n, 1n, 0n, 2n, 2n, q6s_i(1n, 7n, 0n, 1n, 0n, 2n, 2n, q6s_i(0n, 7n, 0n, 1n, 0n, 2n, 2n, {==}, sh_0_1_0_2_2_0()), sh_0_1_0_2_2_1()), sh_0_1_0_2_2_2()), sh_0_1_0_2_2_3()), sh_0_1_0_2_2_4()), sh_0_1_0_2_2_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 2n, 3n, q6s_i(4n, 7n, 0n, 1n, 0n, 2n, 3n, q6s_i(3n, 7n, 0n, 1n, 0n, 2n, 3n, q6s_i(2n, 7n, 0n, 1n, 0n, 2n, 3n, q6s_i(1n, 7n, 0n, 1n, 0n, 2n, 3n, q6s_i(0n, 7n, 0n, 1n, 0n, 2n, 3n, {==}, sh_0_1_0_2_3_0()), sh_0_1_0_2_3_1()), sh_0_1_0_2_3_2()), sh_0_1_0_2_3_3()), sh_0_1_0_2_3_4()), sh_0_1_0_2_3_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 2n, 4n, q6s_i(4n, 7n, 0n, 1n, 0n, 2n, 4n, q6s_i(3n, 7n, 0n, 1n, 0n, 2n, 4n, q6s_i(2n, 7n, 0n, 1n, 0n, 2n, 4n, q6s_i(1n, 7n, 0n, 1n, 0n, 2n, 4n, q6s_i(0n, 7n, 0n, 1n, 0n, 2n, 4n, {==}, sh_0_1_0_2_4_0()), sh_0_1_0_2_4_1()), sh_0_1_0_2_4_2()), sh_0_1_0_2_4_3()), sh_0_1_0_2_4_4()), sh_0_1_0_2_4_5()))
+
+def sq5_0_1_0_3() -> {q5s(5n, 6n, 7n, 0n, 1n, 0n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 0n, 3n, q5s_i(3n, 6n, 7n, 0n, 1n, 0n, 3n, q5s_i(2n, 6n, 7n, 0n, 1n, 0n, 3n, q5s_i(1n, 6n, 7n, 0n, 1n, 0n, 3n, q5s_i(0n, 6n, 7n, 0n, 1n, 0n, 3n, {==}, q6s_i(5n, 7n, 0n, 1n, 0n, 3n, 0n, q6s_i(4n, 7n, 0n, 1n, 0n, 3n, 0n, q6s_i(3n, 7n, 0n, 1n, 0n, 3n, 0n, q6s_i(2n, 7n, 0n, 1n, 0n, 3n, 0n, q6s_i(1n, 7n, 0n, 1n, 0n, 3n, 0n, q6s_i(0n, 7n, 0n, 1n, 0n, 3n, 0n, {==}, sh_0_1_0_3_0_0()), sh_0_1_0_3_0_1()), sh_0_1_0_3_0_2()), sh_0_1_0_3_0_3()), sh_0_1_0_3_0_4()), sh_0_1_0_3_0_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 3n, 1n, q6s_i(4n, 7n, 0n, 1n, 0n, 3n, 1n, q6s_i(3n, 7n, 0n, 1n, 0n, 3n, 1n, q6s_i(2n, 7n, 0n, 1n, 0n, 3n, 1n, q6s_i(1n, 7n, 0n, 1n, 0n, 3n, 1n, q6s_i(0n, 7n, 0n, 1n, 0n, 3n, 1n, {==}, sh_0_1_0_3_1_0()), sh_0_1_0_3_1_1()), sh_0_1_0_3_1_2()), sh_0_1_0_3_1_3()), sh_0_1_0_3_1_4()), sh_0_1_0_3_1_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 3n, 2n, q6s_i(4n, 7n, 0n, 1n, 0n, 3n, 2n, q6s_i(3n, 7n, 0n, 1n, 0n, 3n, 2n, q6s_i(2n, 7n, 0n, 1n, 0n, 3n, 2n, q6s_i(1n, 7n, 0n, 1n, 0n, 3n, 2n, q6s_i(0n, 7n, 0n, 1n, 0n, 3n, 2n, {==}, sh_0_1_0_3_2_0()), sh_0_1_0_3_2_1()), sh_0_1_0_3_2_2()), sh_0_1_0_3_2_3()), sh_0_1_0_3_2_4()), sh_0_1_0_3_2_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 3n, 3n, q6s_i(4n, 7n, 0n, 1n, 0n, 3n, 3n, q6s_i(3n, 7n, 0n, 1n, 0n, 3n, 3n, q6s_i(2n, 7n, 0n, 1n, 0n, 3n, 3n, q6s_i(1n, 7n, 0n, 1n, 0n, 3n, 3n, q6s_i(0n, 7n, 0n, 1n, 0n, 3n, 3n, {==}, sh_0_1_0_3_3_0()), sh_0_1_0_3_3_1()), sh_0_1_0_3_3_2()), sh_0_1_0_3_3_3()), sh_0_1_0_3_3_4()), sh_0_1_0_3_3_5())), q6s_i(5n, 7n, 0n, 1n, 0n, 3n, 4n, q6s_i(4n, 7n, 0n, 1n, 0n, 3n, 4n, q6s_i(3n, 7n, 0n, 1n, 0n, 3n, 4n, q6s_i(2n, 7n, 0n, 1n, 0n, 3n, 4n, q6s_i(1n, 7n, 0n, 1n, 0n, 3n, 4n, q6s_i(0n, 7n, 0n, 1n, 0n, 3n, 4n, {==}, sh_0_1_0_3_4_0()), sh_0_1_0_3_4_1()), sh_0_1_0_3_4_2()), sh_0_1_0_3_4_3()), sh_0_1_0_3_4_4()), sh_0_1_0_3_4_5()))
+
+def sq5_0_1_1_0() -> {q5s(5n, 6n, 7n, 0n, 1n, 1n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 1n, 0n, q5s_i(3n, 6n, 7n, 0n, 1n, 1n, 0n, q5s_i(2n, 6n, 7n, 0n, 1n, 1n, 0n, q5s_i(1n, 6n, 7n, 0n, 1n, 1n, 0n, q5s_i(0n, 6n, 7n, 0n, 1n, 1n, 0n, {==}, q6s_i(5n, 7n, 0n, 1n, 1n, 0n, 0n, q6s_i(4n, 7n, 0n, 1n, 1n, 0n, 0n, q6s_i(3n, 7n, 0n, 1n, 1n, 0n, 0n, q6s_i(2n, 7n, 0n, 1n, 1n, 0n, 0n, q6s_i(1n, 7n, 0n, 1n, 1n, 0n, 0n, q6s_i(0n, 7n, 0n, 1n, 1n, 0n, 0n, {==}, sh_0_1_1_0_0_0()), sh_0_1_1_0_0_1()), sh_0_1_1_0_0_2()), sh_0_1_1_0_0_3()), sh_0_1_1_0_0_4()), sh_0_1_1_0_0_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 0n, 1n, q6s_i(4n, 7n, 0n, 1n, 1n, 0n, 1n, q6s_i(3n, 7n, 0n, 1n, 1n, 0n, 1n, q6s_i(2n, 7n, 0n, 1n, 1n, 0n, 1n, q6s_i(1n, 7n, 0n, 1n, 1n, 0n, 1n, q6s_i(0n, 7n, 0n, 1n, 1n, 0n, 1n, {==}, sh_0_1_1_0_1_0()), sh_0_1_1_0_1_1()), sh_0_1_1_0_1_2()), sh_0_1_1_0_1_3()), sh_0_1_1_0_1_4()), sh_0_1_1_0_1_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 0n, 2n, q6s_i(4n, 7n, 0n, 1n, 1n, 0n, 2n, q6s_i(3n, 7n, 0n, 1n, 1n, 0n, 2n, q6s_i(2n, 7n, 0n, 1n, 1n, 0n, 2n, q6s_i(1n, 7n, 0n, 1n, 1n, 0n, 2n, q6s_i(0n, 7n, 0n, 1n, 1n, 0n, 2n, {==}, sh_0_1_1_0_2_0()), sh_0_1_1_0_2_1()), sh_0_1_1_0_2_2()), sh_0_1_1_0_2_3()), sh_0_1_1_0_2_4()), sh_0_1_1_0_2_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 0n, 3n, q6s_i(4n, 7n, 0n, 1n, 1n, 0n, 3n, q6s_i(3n, 7n, 0n, 1n, 1n, 0n, 3n, q6s_i(2n, 7n, 0n, 1n, 1n, 0n, 3n, q6s_i(1n, 7n, 0n, 1n, 1n, 0n, 3n, q6s_i(0n, 7n, 0n, 1n, 1n, 0n, 3n, {==}, sh_0_1_1_0_3_0()), sh_0_1_1_0_3_1()), sh_0_1_1_0_3_2()), sh_0_1_1_0_3_3()), sh_0_1_1_0_3_4()), sh_0_1_1_0_3_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 0n, 4n, q6s_i(4n, 7n, 0n, 1n, 1n, 0n, 4n, q6s_i(3n, 7n, 0n, 1n, 1n, 0n, 4n, q6s_i(2n, 7n, 0n, 1n, 1n, 0n, 4n, q6s_i(1n, 7n, 0n, 1n, 1n, 0n, 4n, q6s_i(0n, 7n, 0n, 1n, 1n, 0n, 4n, {==}, sh_0_1_1_0_4_0()), sh_0_1_1_0_4_1()), sh_0_1_1_0_4_2()), sh_0_1_1_0_4_3()), sh_0_1_1_0_4_4()), sh_0_1_1_0_4_5()))
+
+def sq5_0_1_1_1() -> {q5s(5n, 6n, 7n, 0n, 1n, 1n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 1n, 1n, q5s_i(3n, 6n, 7n, 0n, 1n, 1n, 1n, q5s_i(2n, 6n, 7n, 0n, 1n, 1n, 1n, q5s_i(1n, 6n, 7n, 0n, 1n, 1n, 1n, q5s_i(0n, 6n, 7n, 0n, 1n, 1n, 1n, {==}, q6s_i(5n, 7n, 0n, 1n, 1n, 1n, 0n, q6s_i(4n, 7n, 0n, 1n, 1n, 1n, 0n, q6s_i(3n, 7n, 0n, 1n, 1n, 1n, 0n, q6s_i(2n, 7n, 0n, 1n, 1n, 1n, 0n, q6s_i(1n, 7n, 0n, 1n, 1n, 1n, 0n, q6s_i(0n, 7n, 0n, 1n, 1n, 1n, 0n, {==}, sh_0_1_1_1_0_0()), sh_0_1_1_1_0_1()), sh_0_1_1_1_0_2()), sh_0_1_1_1_0_3()), sh_0_1_1_1_0_4()), sh_0_1_1_1_0_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 1n, 1n, q6s_i(4n, 7n, 0n, 1n, 1n, 1n, 1n, q6s_i(3n, 7n, 0n, 1n, 1n, 1n, 1n, q6s_i(2n, 7n, 0n, 1n, 1n, 1n, 1n, q6s_i(1n, 7n, 0n, 1n, 1n, 1n, 1n, q6s_i(0n, 7n, 0n, 1n, 1n, 1n, 1n, {==}, sh_0_1_1_1_1_0()), sh_0_1_1_1_1_1()), sh_0_1_1_1_1_2()), sh_0_1_1_1_1_3()), sh_0_1_1_1_1_4()), sh_0_1_1_1_1_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 1n, 2n, q6s_i(4n, 7n, 0n, 1n, 1n, 1n, 2n, q6s_i(3n, 7n, 0n, 1n, 1n, 1n, 2n, q6s_i(2n, 7n, 0n, 1n, 1n, 1n, 2n, q6s_i(1n, 7n, 0n, 1n, 1n, 1n, 2n, q6s_i(0n, 7n, 0n, 1n, 1n, 1n, 2n, {==}, sh_0_1_1_1_2_0()), sh_0_1_1_1_2_1()), sh_0_1_1_1_2_2()), sh_0_1_1_1_2_3()), sh_0_1_1_1_2_4()), sh_0_1_1_1_2_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 1n, 3n, q6s_i(4n, 7n, 0n, 1n, 1n, 1n, 3n, q6s_i(3n, 7n, 0n, 1n, 1n, 1n, 3n, q6s_i(2n, 7n, 0n, 1n, 1n, 1n, 3n, q6s_i(1n, 7n, 0n, 1n, 1n, 1n, 3n, q6s_i(0n, 7n, 0n, 1n, 1n, 1n, 3n, {==}, sh_0_1_1_1_3_0()), sh_0_1_1_1_3_1()), sh_0_1_1_1_3_2()), sh_0_1_1_1_3_3()), sh_0_1_1_1_3_4()), sh_0_1_1_1_3_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 1n, 4n, q6s_i(4n, 7n, 0n, 1n, 1n, 1n, 4n, q6s_i(3n, 7n, 0n, 1n, 1n, 1n, 4n, q6s_i(2n, 7n, 0n, 1n, 1n, 1n, 4n, q6s_i(1n, 7n, 0n, 1n, 1n, 1n, 4n, q6s_i(0n, 7n, 0n, 1n, 1n, 1n, 4n, {==}, sh_0_1_1_1_4_0()), sh_0_1_1_1_4_1()), sh_0_1_1_1_4_2()), sh_0_1_1_1_4_3()), sh_0_1_1_1_4_4()), sh_0_1_1_1_4_5()))
+
+def sq5_0_1_1_2() -> {q5s(5n, 6n, 7n, 0n, 1n, 1n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 1n, 2n, q5s_i(3n, 6n, 7n, 0n, 1n, 1n, 2n, q5s_i(2n, 6n, 7n, 0n, 1n, 1n, 2n, q5s_i(1n, 6n, 7n, 0n, 1n, 1n, 2n, q5s_i(0n, 6n, 7n, 0n, 1n, 1n, 2n, {==}, q6s_i(5n, 7n, 0n, 1n, 1n, 2n, 0n, q6s_i(4n, 7n, 0n, 1n, 1n, 2n, 0n, q6s_i(3n, 7n, 0n, 1n, 1n, 2n, 0n, q6s_i(2n, 7n, 0n, 1n, 1n, 2n, 0n, q6s_i(1n, 7n, 0n, 1n, 1n, 2n, 0n, q6s_i(0n, 7n, 0n, 1n, 1n, 2n, 0n, {==}, sh_0_1_1_2_0_0()), sh_0_1_1_2_0_1()), sh_0_1_1_2_0_2()), sh_0_1_1_2_0_3()), sh_0_1_1_2_0_4()), sh_0_1_1_2_0_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 2n, 1n, q6s_i(4n, 7n, 0n, 1n, 1n, 2n, 1n, q6s_i(3n, 7n, 0n, 1n, 1n, 2n, 1n, q6s_i(2n, 7n, 0n, 1n, 1n, 2n, 1n, q6s_i(1n, 7n, 0n, 1n, 1n, 2n, 1n, q6s_i(0n, 7n, 0n, 1n, 1n, 2n, 1n, {==}, sh_0_1_1_2_1_0()), sh_0_1_1_2_1_1()), sh_0_1_1_2_1_2()), sh_0_1_1_2_1_3()), sh_0_1_1_2_1_4()), sh_0_1_1_2_1_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 2n, 2n, q6s_i(4n, 7n, 0n, 1n, 1n, 2n, 2n, q6s_i(3n, 7n, 0n, 1n, 1n, 2n, 2n, q6s_i(2n, 7n, 0n, 1n, 1n, 2n, 2n, q6s_i(1n, 7n, 0n, 1n, 1n, 2n, 2n, q6s_i(0n, 7n, 0n, 1n, 1n, 2n, 2n, {==}, sh_0_1_1_2_2_0()), sh_0_1_1_2_2_1()), sh_0_1_1_2_2_2()), sh_0_1_1_2_2_3()), sh_0_1_1_2_2_4()), sh_0_1_1_2_2_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 2n, 3n, q6s_i(4n, 7n, 0n, 1n, 1n, 2n, 3n, q6s_i(3n, 7n, 0n, 1n, 1n, 2n, 3n, q6s_i(2n, 7n, 0n, 1n, 1n, 2n, 3n, q6s_i(1n, 7n, 0n, 1n, 1n, 2n, 3n, q6s_i(0n, 7n, 0n, 1n, 1n, 2n, 3n, {==}, sh_0_1_1_2_3_0()), sh_0_1_1_2_3_1()), sh_0_1_1_2_3_2()), sh_0_1_1_2_3_3()), sh_0_1_1_2_3_4()), sh_0_1_1_2_3_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 2n, 4n, q6s_i(4n, 7n, 0n, 1n, 1n, 2n, 4n, q6s_i(3n, 7n, 0n, 1n, 1n, 2n, 4n, q6s_i(2n, 7n, 0n, 1n, 1n, 2n, 4n, q6s_i(1n, 7n, 0n, 1n, 1n, 2n, 4n, q6s_i(0n, 7n, 0n, 1n, 1n, 2n, 4n, {==}, sh_0_1_1_2_4_0()), sh_0_1_1_2_4_1()), sh_0_1_1_2_4_2()), sh_0_1_1_2_4_3()), sh_0_1_1_2_4_4()), sh_0_1_1_2_4_5()))
+
+def sq5_0_1_1_3() -> {q5s(5n, 6n, 7n, 0n, 1n, 1n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 1n, 3n, q5s_i(3n, 6n, 7n, 0n, 1n, 1n, 3n, q5s_i(2n, 6n, 7n, 0n, 1n, 1n, 3n, q5s_i(1n, 6n, 7n, 0n, 1n, 1n, 3n, q5s_i(0n, 6n, 7n, 0n, 1n, 1n, 3n, {==}, q6s_i(5n, 7n, 0n, 1n, 1n, 3n, 0n, q6s_i(4n, 7n, 0n, 1n, 1n, 3n, 0n, q6s_i(3n, 7n, 0n, 1n, 1n, 3n, 0n, q6s_i(2n, 7n, 0n, 1n, 1n, 3n, 0n, q6s_i(1n, 7n, 0n, 1n, 1n, 3n, 0n, q6s_i(0n, 7n, 0n, 1n, 1n, 3n, 0n, {==}, sh_0_1_1_3_0_0()), sh_0_1_1_3_0_1()), sh_0_1_1_3_0_2()), sh_0_1_1_3_0_3()), sh_0_1_1_3_0_4()), sh_0_1_1_3_0_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 3n, 1n, q6s_i(4n, 7n, 0n, 1n, 1n, 3n, 1n, q6s_i(3n, 7n, 0n, 1n, 1n, 3n, 1n, q6s_i(2n, 7n, 0n, 1n, 1n, 3n, 1n, q6s_i(1n, 7n, 0n, 1n, 1n, 3n, 1n, q6s_i(0n, 7n, 0n, 1n, 1n, 3n, 1n, {==}, sh_0_1_1_3_1_0()), sh_0_1_1_3_1_1()), sh_0_1_1_3_1_2()), sh_0_1_1_3_1_3()), sh_0_1_1_3_1_4()), sh_0_1_1_3_1_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 3n, 2n, q6s_i(4n, 7n, 0n, 1n, 1n, 3n, 2n, q6s_i(3n, 7n, 0n, 1n, 1n, 3n, 2n, q6s_i(2n, 7n, 0n, 1n, 1n, 3n, 2n, q6s_i(1n, 7n, 0n, 1n, 1n, 3n, 2n, q6s_i(0n, 7n, 0n, 1n, 1n, 3n, 2n, {==}, sh_0_1_1_3_2_0()), sh_0_1_1_3_2_1()), sh_0_1_1_3_2_2()), sh_0_1_1_3_2_3()), sh_0_1_1_3_2_4()), sh_0_1_1_3_2_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 3n, 3n, q6s_i(4n, 7n, 0n, 1n, 1n, 3n, 3n, q6s_i(3n, 7n, 0n, 1n, 1n, 3n, 3n, q6s_i(2n, 7n, 0n, 1n, 1n, 3n, 3n, q6s_i(1n, 7n, 0n, 1n, 1n, 3n, 3n, q6s_i(0n, 7n, 0n, 1n, 1n, 3n, 3n, {==}, sh_0_1_1_3_3_0()), sh_0_1_1_3_3_1()), sh_0_1_1_3_3_2()), sh_0_1_1_3_3_3()), sh_0_1_1_3_3_4()), sh_0_1_1_3_3_5())), q6s_i(5n, 7n, 0n, 1n, 1n, 3n, 4n, q6s_i(4n, 7n, 0n, 1n, 1n, 3n, 4n, q6s_i(3n, 7n, 0n, 1n, 1n, 3n, 4n, q6s_i(2n, 7n, 0n, 1n, 1n, 3n, 4n, q6s_i(1n, 7n, 0n, 1n, 1n, 3n, 4n, q6s_i(0n, 7n, 0n, 1n, 1n, 3n, 4n, {==}, sh_0_1_1_3_4_0()), sh_0_1_1_3_4_1()), sh_0_1_1_3_4_2()), sh_0_1_1_3_4_3()), sh_0_1_1_3_4_4()), sh_0_1_1_3_4_5()))
+
+def sq5_0_1_2_0() -> {q5s(5n, 6n, 7n, 0n, 1n, 2n, 0n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 2n, 0n, q5s_i(3n, 6n, 7n, 0n, 1n, 2n, 0n, q5s_i(2n, 6n, 7n, 0n, 1n, 2n, 0n, q5s_i(1n, 6n, 7n, 0n, 1n, 2n, 0n, q5s_i(0n, 6n, 7n, 0n, 1n, 2n, 0n, {==}, q6s_i(5n, 7n, 0n, 1n, 2n, 0n, 0n, q6s_i(4n, 7n, 0n, 1n, 2n, 0n, 0n, q6s_i(3n, 7n, 0n, 1n, 2n, 0n, 0n, q6s_i(2n, 7n, 0n, 1n, 2n, 0n, 0n, q6s_i(1n, 7n, 0n, 1n, 2n, 0n, 0n, q6s_i(0n, 7n, 0n, 1n, 2n, 0n, 0n, {==}, sh_0_1_2_0_0_0()), sh_0_1_2_0_0_1()), sh_0_1_2_0_0_2()), sh_0_1_2_0_0_3()), sh_0_1_2_0_0_4()), sh_0_1_2_0_0_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 0n, 1n, q6s_i(4n, 7n, 0n, 1n, 2n, 0n, 1n, q6s_i(3n, 7n, 0n, 1n, 2n, 0n, 1n, q6s_i(2n, 7n, 0n, 1n, 2n, 0n, 1n, q6s_i(1n, 7n, 0n, 1n, 2n, 0n, 1n, q6s_i(0n, 7n, 0n, 1n, 2n, 0n, 1n, {==}, sh_0_1_2_0_1_0()), sh_0_1_2_0_1_1()), sh_0_1_2_0_1_2()), sh_0_1_2_0_1_3()), sh_0_1_2_0_1_4()), sh_0_1_2_0_1_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 0n, 2n, q6s_i(4n, 7n, 0n, 1n, 2n, 0n, 2n, q6s_i(3n, 7n, 0n, 1n, 2n, 0n, 2n, q6s_i(2n, 7n, 0n, 1n, 2n, 0n, 2n, q6s_i(1n, 7n, 0n, 1n, 2n, 0n, 2n, q6s_i(0n, 7n, 0n, 1n, 2n, 0n, 2n, {==}, sh_0_1_2_0_2_0()), sh_0_1_2_0_2_1()), sh_0_1_2_0_2_2()), sh_0_1_2_0_2_3()), sh_0_1_2_0_2_4()), sh_0_1_2_0_2_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 0n, 3n, q6s_i(4n, 7n, 0n, 1n, 2n, 0n, 3n, q6s_i(3n, 7n, 0n, 1n, 2n, 0n, 3n, q6s_i(2n, 7n, 0n, 1n, 2n, 0n, 3n, q6s_i(1n, 7n, 0n, 1n, 2n, 0n, 3n, q6s_i(0n, 7n, 0n, 1n, 2n, 0n, 3n, {==}, sh_0_1_2_0_3_0()), sh_0_1_2_0_3_1()), sh_0_1_2_0_3_2()), sh_0_1_2_0_3_3()), sh_0_1_2_0_3_4()), sh_0_1_2_0_3_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 0n, 4n, q6s_i(4n, 7n, 0n, 1n, 2n, 0n, 4n, q6s_i(3n, 7n, 0n, 1n, 2n, 0n, 4n, q6s_i(2n, 7n, 0n, 1n, 2n, 0n, 4n, q6s_i(1n, 7n, 0n, 1n, 2n, 0n, 4n, q6s_i(0n, 7n, 0n, 1n, 2n, 0n, 4n, {==}, sh_0_1_2_0_4_0()), sh_0_1_2_0_4_1()), sh_0_1_2_0_4_2()), sh_0_1_2_0_4_3()), sh_0_1_2_0_4_4()), sh_0_1_2_0_4_5()))
+
+def sq5_0_1_2_1() -> {q5s(5n, 6n, 7n, 0n, 1n, 2n, 1n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 2n, 1n, q5s_i(3n, 6n, 7n, 0n, 1n, 2n, 1n, q5s_i(2n, 6n, 7n, 0n, 1n, 2n, 1n, q5s_i(1n, 6n, 7n, 0n, 1n, 2n, 1n, q5s_i(0n, 6n, 7n, 0n, 1n, 2n, 1n, {==}, q6s_i(5n, 7n, 0n, 1n, 2n, 1n, 0n, q6s_i(4n, 7n, 0n, 1n, 2n, 1n, 0n, q6s_i(3n, 7n, 0n, 1n, 2n, 1n, 0n, q6s_i(2n, 7n, 0n, 1n, 2n, 1n, 0n, q6s_i(1n, 7n, 0n, 1n, 2n, 1n, 0n, q6s_i(0n, 7n, 0n, 1n, 2n, 1n, 0n, {==}, sh_0_1_2_1_0_0()), sh_0_1_2_1_0_1()), sh_0_1_2_1_0_2()), sh_0_1_2_1_0_3()), sh_0_1_2_1_0_4()), sh_0_1_2_1_0_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 1n, 1n, q6s_i(4n, 7n, 0n, 1n, 2n, 1n, 1n, q6s_i(3n, 7n, 0n, 1n, 2n, 1n, 1n, q6s_i(2n, 7n, 0n, 1n, 2n, 1n, 1n, q6s_i(1n, 7n, 0n, 1n, 2n, 1n, 1n, q6s_i(0n, 7n, 0n, 1n, 2n, 1n, 1n, {==}, sh_0_1_2_1_1_0()), sh_0_1_2_1_1_1()), sh_0_1_2_1_1_2()), sh_0_1_2_1_1_3()), sh_0_1_2_1_1_4()), sh_0_1_2_1_1_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 1n, 2n, q6s_i(4n, 7n, 0n, 1n, 2n, 1n, 2n, q6s_i(3n, 7n, 0n, 1n, 2n, 1n, 2n, q6s_i(2n, 7n, 0n, 1n, 2n, 1n, 2n, q6s_i(1n, 7n, 0n, 1n, 2n, 1n, 2n, q6s_i(0n, 7n, 0n, 1n, 2n, 1n, 2n, {==}, sh_0_1_2_1_2_0()), sh_0_1_2_1_2_1()), sh_0_1_2_1_2_2()), sh_0_1_2_1_2_3()), sh_0_1_2_1_2_4()), sh_0_1_2_1_2_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 1n, 3n, q6s_i(4n, 7n, 0n, 1n, 2n, 1n, 3n, q6s_i(3n, 7n, 0n, 1n, 2n, 1n, 3n, q6s_i(2n, 7n, 0n, 1n, 2n, 1n, 3n, q6s_i(1n, 7n, 0n, 1n, 2n, 1n, 3n, q6s_i(0n, 7n, 0n, 1n, 2n, 1n, 3n, {==}, sh_0_1_2_1_3_0()), sh_0_1_2_1_3_1()), sh_0_1_2_1_3_2()), sh_0_1_2_1_3_3()), sh_0_1_2_1_3_4()), sh_0_1_2_1_3_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 1n, 4n, q6s_i(4n, 7n, 0n, 1n, 2n, 1n, 4n, q6s_i(3n, 7n, 0n, 1n, 2n, 1n, 4n, q6s_i(2n, 7n, 0n, 1n, 2n, 1n, 4n, q6s_i(1n, 7n, 0n, 1n, 2n, 1n, 4n, q6s_i(0n, 7n, 0n, 1n, 2n, 1n, 4n, {==}, sh_0_1_2_1_4_0()), sh_0_1_2_1_4_1()), sh_0_1_2_1_4_2()), sh_0_1_2_1_4_3()), sh_0_1_2_1_4_4()), sh_0_1_2_1_4_5()))
+
+def sq5_0_1_2_2() -> {q5s(5n, 6n, 7n, 0n, 1n, 2n, 2n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 2n, 2n, q5s_i(3n, 6n, 7n, 0n, 1n, 2n, 2n, q5s_i(2n, 6n, 7n, 0n, 1n, 2n, 2n, q5s_i(1n, 6n, 7n, 0n, 1n, 2n, 2n, q5s_i(0n, 6n, 7n, 0n, 1n, 2n, 2n, {==}, q6s_i(5n, 7n, 0n, 1n, 2n, 2n, 0n, q6s_i(4n, 7n, 0n, 1n, 2n, 2n, 0n, q6s_i(3n, 7n, 0n, 1n, 2n, 2n, 0n, q6s_i(2n, 7n, 0n, 1n, 2n, 2n, 0n, q6s_i(1n, 7n, 0n, 1n, 2n, 2n, 0n, q6s_i(0n, 7n, 0n, 1n, 2n, 2n, 0n, {==}, sh_0_1_2_2_0_0()), sh_0_1_2_2_0_1()), sh_0_1_2_2_0_2()), sh_0_1_2_2_0_3()), sh_0_1_2_2_0_4()), sh_0_1_2_2_0_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 2n, 1n, q6s_i(4n, 7n, 0n, 1n, 2n, 2n, 1n, q6s_i(3n, 7n, 0n, 1n, 2n, 2n, 1n, q6s_i(2n, 7n, 0n, 1n, 2n, 2n, 1n, q6s_i(1n, 7n, 0n, 1n, 2n, 2n, 1n, q6s_i(0n, 7n, 0n, 1n, 2n, 2n, 1n, {==}, sh_0_1_2_2_1_0()), sh_0_1_2_2_1_1()), sh_0_1_2_2_1_2()), sh_0_1_2_2_1_3()), sh_0_1_2_2_1_4()), sh_0_1_2_2_1_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 2n, 2n, q6s_i(4n, 7n, 0n, 1n, 2n, 2n, 2n, q6s_i(3n, 7n, 0n, 1n, 2n, 2n, 2n, q6s_i(2n, 7n, 0n, 1n, 2n, 2n, 2n, q6s_i(1n, 7n, 0n, 1n, 2n, 2n, 2n, q6s_i(0n, 7n, 0n, 1n, 2n, 2n, 2n, {==}, sh_0_1_2_2_2_0()), sh_0_1_2_2_2_1()), sh_0_1_2_2_2_2()), sh_0_1_2_2_2_3()), sh_0_1_2_2_2_4()), sh_0_1_2_2_2_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 2n, 3n, q6s_i(4n, 7n, 0n, 1n, 2n, 2n, 3n, q6s_i(3n, 7n, 0n, 1n, 2n, 2n, 3n, q6s_i(2n, 7n, 0n, 1n, 2n, 2n, 3n, q6s_i(1n, 7n, 0n, 1n, 2n, 2n, 3n, q6s_i(0n, 7n, 0n, 1n, 2n, 2n, 3n, {==}, sh_0_1_2_2_3_0()), sh_0_1_2_2_3_1()), sh_0_1_2_2_3_2()), sh_0_1_2_2_3_3()), sh_0_1_2_2_3_4()), sh_0_1_2_2_3_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 2n, 4n, q6s_i(4n, 7n, 0n, 1n, 2n, 2n, 4n, q6s_i(3n, 7n, 0n, 1n, 2n, 2n, 4n, q6s_i(2n, 7n, 0n, 1n, 2n, 2n, 4n, q6s_i(1n, 7n, 0n, 1n, 2n, 2n, 4n, q6s_i(0n, 7n, 0n, 1n, 2n, 2n, 4n, {==}, sh_0_1_2_2_4_0()), sh_0_1_2_2_4_1()), sh_0_1_2_2_4_2()), sh_0_1_2_2_4_3()), sh_0_1_2_2_4_4()), sh_0_1_2_2_4_5()))
+
+def sq5_0_1_2_3() -> {q5s(5n, 6n, 7n, 0n, 1n, 2n, 3n) == True{} : Bool}:
+  q5s_i(4n, 6n, 7n, 0n, 1n, 2n, 3n, q5s_i(3n, 6n, 7n, 0n, 1n, 2n, 3n, q5s_i(2n, 6n, 7n, 0n, 1n, 2n, 3n, q5s_i(1n, 6n, 7n, 0n, 1n, 2n, 3n, q5s_i(0n, 6n, 7n, 0n, 1n, 2n, 3n, {==}, q6s_i(5n, 7n, 0n, 1n, 2n, 3n, 0n, q6s_i(4n, 7n, 0n, 1n, 2n, 3n, 0n, q6s_i(3n, 7n, 0n, 1n, 2n, 3n, 0n, q6s_i(2n, 7n, 0n, 1n, 2n, 3n, 0n, q6s_i(1n, 7n, 0n, 1n, 2n, 3n, 0n, q6s_i(0n, 7n, 0n, 1n, 2n, 3n, 0n, {==}, sh_0_1_2_3_0_0()), sh_0_1_2_3_0_1()), sh_0_1_2_3_0_2()), sh_0_1_2_3_0_3()), sh_0_1_2_3_0_4()), sh_0_1_2_3_0_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 3n, 1n, q6s_i(4n, 7n, 0n, 1n, 2n, 3n, 1n, q6s_i(3n, 7n, 0n, 1n, 2n, 3n, 1n, q6s_i(2n, 7n, 0n, 1n, 2n, 3n, 1n, q6s_i(1n, 7n, 0n, 1n, 2n, 3n, 1n, q6s_i(0n, 7n, 0n, 1n, 2n, 3n, 1n, {==}, sh_0_1_2_3_1_0()), sh_0_1_2_3_1_1()), sh_0_1_2_3_1_2()), sh_0_1_2_3_1_3()), sh_0_1_2_3_1_4()), sh_0_1_2_3_1_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 3n, 2n, q6s_i(4n, 7n, 0n, 1n, 2n, 3n, 2n, q6s_i(3n, 7n, 0n, 1n, 2n, 3n, 2n, q6s_i(2n, 7n, 0n, 1n, 2n, 3n, 2n, q6s_i(1n, 7n, 0n, 1n, 2n, 3n, 2n, q6s_i(0n, 7n, 0n, 1n, 2n, 3n, 2n, {==}, sh_0_1_2_3_2_0()), sh_0_1_2_3_2_1()), sh_0_1_2_3_2_2()), sh_0_1_2_3_2_3()), sh_0_1_2_3_2_4()), sh_0_1_2_3_2_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 3n, 3n, q6s_i(4n, 7n, 0n, 1n, 2n, 3n, 3n, q6s_i(3n, 7n, 0n, 1n, 2n, 3n, 3n, q6s_i(2n, 7n, 0n, 1n, 2n, 3n, 3n, q6s_i(1n, 7n, 0n, 1n, 2n, 3n, 3n, q6s_i(0n, 7n, 0n, 1n, 2n, 3n, 3n, {==}, sh_0_1_2_3_3_0()), sh_0_1_2_3_3_1()), sh_0_1_2_3_3_2()), sh_0_1_2_3_3_3()), sh_0_1_2_3_3_4()), sh_0_1_2_3_3_5())), q6s_i(5n, 7n, 0n, 1n, 2n, 3n, 4n, q6s_i(4n, 7n, 0n, 1n, 2n, 3n, 4n, q6s_i(3n, 7n, 0n, 1n, 2n, 3n, 4n, q6s_i(2n, 7n, 0n, 1n, 2n, 3n, 4n, q6s_i(1n, 7n, 0n, 1n, 2n, 3n, 4n, q6s_i(0n, 7n, 0n, 1n, 2n, 3n, 4n, {==}, sh_0_1_2_3_4_0()), sh_0_1_2_3_4_1()), sh_0_1_2_3_4_2()), sh_0_1_2_3_4_3()), sh_0_1_2_3_4_4()), sh_0_1_2_3_4_5()))
+
+def shape_all() -> {q1s(1n, 2n, 3n, 4n, 5n, 6n, 7n) == True{} : Bool}:
+  q1s_i(0n, 2n, 3n, 4n, 5n, 6n, 7n, {==}, q2s_i(1n, 3n, 4n, 5n, 6n, 7n, 0n, q2s_i(0n, 3n, 4n, 5n, 6n, 7n, 0n, {==}, q3s_i(2n, 4n, 5n, 6n, 7n, 0n, 0n, q3s_i(1n, 4n, 5n, 6n, 7n, 0n, 0n, q3s_i(0n, 4n, 5n, 6n, 7n, 0n, 0n, {==}, q4s_i(3n, 5n, 6n, 7n, 0n, 0n, 0n, q4s_i(2n, 5n, 6n, 7n, 0n, 0n, 0n, q4s_i(1n, 5n, 6n, 7n, 0n, 0n, 0n, q4s_i(0n, 5n, 6n, 7n, 0n, 0n, 0n, {==}, sq5_0_0_0_0()), sq5_0_0_0_1()), sq5_0_0_0_2()), sq5_0_0_0_3())), q4s_i(3n, 5n, 6n, 7n, 0n, 0n, 1n, q4s_i(2n, 5n, 6n, 7n, 0n, 0n, 1n, q4s_i(1n, 5n, 6n, 7n, 0n, 0n, 1n, q4s_i(0n, 5n, 6n, 7n, 0n, 0n, 1n, {==}, sq5_0_0_1_0()), sq5_0_0_1_1()), sq5_0_0_1_2()), sq5_0_0_1_3())), q4s_i(3n, 5n, 6n, 7n, 0n, 0n, 2n, q4s_i(2n, 5n, 6n, 7n, 0n, 0n, 2n, q4s_i(1n, 5n, 6n, 7n, 0n, 0n, 2n, q4s_i(0n, 5n, 6n, 7n, 0n, 0n, 2n, {==}, sq5_0_0_2_0()), sq5_0_0_2_1()), sq5_0_0_2_2()), sq5_0_0_2_3()))), q3s_i(2n, 4n, 5n, 6n, 7n, 0n, 1n, q3s_i(1n, 4n, 5n, 6n, 7n, 0n, 1n, q3s_i(0n, 4n, 5n, 6n, 7n, 0n, 1n, {==}, q4s_i(3n, 5n, 6n, 7n, 0n, 1n, 0n, q4s_i(2n, 5n, 6n, 7n, 0n, 1n, 0n, q4s_i(1n, 5n, 6n, 7n, 0n, 1n, 0n, q4s_i(0n, 5n, 6n, 7n, 0n, 1n, 0n, {==}, sq5_0_1_0_0()), sq5_0_1_0_1()), sq5_0_1_0_2()), sq5_0_1_0_3())), q4s_i(3n, 5n, 6n, 7n, 0n, 1n, 1n, q4s_i(2n, 5n, 6n, 7n, 0n, 1n, 1n, q4s_i(1n, 5n, 6n, 7n, 0n, 1n, 1n, q4s_i(0n, 5n, 6n, 7n, 0n, 1n, 1n, {==}, sq5_0_1_1_0()), sq5_0_1_1_1()), sq5_0_1_1_2()), sq5_0_1_1_3())), q4s_i(3n, 5n, 6n, 7n, 0n, 1n, 2n, q4s_i(2n, 5n, 6n, 7n, 0n, 1n, 2n, q4s_i(1n, 5n, 6n, 7n, 0n, 1n, 2n, q4s_i(0n, 5n, 6n, 7n, 0n, 1n, 2n, {==}, sq5_0_1_2_0()), sq5_0_1_2_1()), sq5_0_1_2_2()), sq5_0_1_2_3()))))
+
 
 # Down the enumeration levels, with the level bounds b2 .. b7 kept opaque (no unfolding)
 def shape_chain(+q1: Nat, +q2: Nat, +q3: Nat, +q4: Nat, +q5: Nat, +q6: Nat, +q7: Nat, +b2: Nat, +b3: Nat, +b4: Nat, +b5: Nat, +b6: Nat, +b7: Nat,
@@ -435,7 +2703,7 @@ def shape_true(+q1: Nat, +q2: Nat, +q3: Nat, +q4: Nat, +q5: Nat, +q6: Nat, +q7: 
   +h6 = at_and_l(Nat.is_lt(q6, 6n), Nat.is_lt(q7, 7n), l5)
   +l6 = at_and_r(Nat.is_lt(q6, 6n), Nat.is_lt(q7, 7n), l5)
   +h7 = l6
-  shape_chain(q1, q2, q3, q4, q5, q6, q7, 2n, 3n, 4n, 5n, 6n, 7n, h1, h2, h3, h4, h5, h6, h7, {==})
+  shape_chain(q1, q2, q3, q4, q5, q6, q7, 2n, 3n, 4n, 5n, 6n, 7n, h1, h2, h3, h4, h5, h6, h7, shape_all())
 
 # Row r's conjuncts
 def row_true(+q1: Nat, +q2: Nat, +q3: Nat, +q4: Nat, +q5: Nat, +q6: Nat, +q7: Nat, +legal: {Spec.legal(q1, q2, q3, q4, q5, q6, q7) == True{} : Bool}, +r: Nat, +hr: {Nat.is_lt(r, 8n) == True{} : Bool}) -> {row_ok(Spec.desc(Spec.shape(q1, q2, q3, q4, q5, q6, q7)), r) == True{} : Bool}:

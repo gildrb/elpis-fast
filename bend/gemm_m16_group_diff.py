@@ -22,6 +22,7 @@ m 1..16, G in {82, 164}) plus seeded random bundles. Differential evidence on fi
 not a proof. `--mutate NAME` applies a deliberate source mutation that the check must reject.
 
 Usage: python3 bend/gemm_m16_group_diff.py [--mutate NAME] PATCH_2102 [PATCH_2001]
+  PATCH_2102: patches/exl3-ext/2102-proj-m16-grouped-v2-on3003-5101.patch (sha256-pinned).
 """
 
 from __future__ import annotations
@@ -35,13 +36,15 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/GEMM_M16_GROUP_TABLE.bend"
 # The shipped 2102: 2102-proj-m16-grouped-v2-on3003-5101.patch (hunk positions rebased onto 3003 +
 # 5101; its new kernel/host files are byte-identical to 2102 v2 50f75e69...)
 PATCH_SHA = "c12f897d48c07ab26fbdda03f1a44e762324ede735b8bb461b2cc8f8a8a66ff3"
-LOCK = ["flock", "-s", "/tmp/elpis-gpu.lock", "nice", "-n", "19"]
 
 MUTATIONS = {
     # host gbase prefix sum off by one (every matrix after the first starts one group late)
@@ -521,9 +524,10 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(K, H, V1))
         exe = Path(td) / "diff"
-        subprocess.run(LOCK + ["c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)], check=True)
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)]), check=True)
         tab = Path(td) / "table"
-        subprocess.run(LOCK + [BEND, TABLE, "-o", str(tab)], cwd=REPO, check=True, capture_output=True)
+        subprocess.run(source_link.locked([source_link.bend(), TABLE, "-o", str(tab)]), cwd=REPO, check=True,
+                       capture_output=True)
         rows = bad = mism = live = 0
         for (m, k, G, ns) in cfgs:
             args = [str(m), str(k), str(G)] + [str(n) for n in ns]

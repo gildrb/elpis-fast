@@ -16,6 +16,9 @@ Differential evidence on finite instances, not a proof. `--mutate NAME` applies 
 kernel mutation that the check must reject.
 
 Usage: python3 bend/attn_split_diff.py [--mutate NAME] ATTN_VERIFY_SRC_DIR
+  ATTN_VERIFY_SRC_DIR: the exllamav3_ext directory of an engine tree with the av_split_len
+  revision of patch 3003. The tracked 3003 (fixed kv chunks) does not have it; see
+  bend/attn_chunk_diff.py.
 """
 
 from __future__ import annotations
@@ -26,8 +29,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/ATTN_SPLIT_TABLE.bend"
 LS = [1, 8, 63, 64, 65, 115, 127, 128, 129, 256, 257, 1000, 1288, 2056, 4104, 8198, 12808, 18608, 32736]
 SS = [1, 2, 3, 7, 20, 40, 82]
@@ -160,9 +166,10 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(cuh, cu))
         exe = Path(td) / "diff"
-        subprocess.run(["c++", "-O2", "-std=c++17", "-o", str(exe), str(c)], check=True)
-        cres = subprocess.run([str(exe)], capture_output=True, text=True)
-    bres = subprocess.run([BEND, TABLE], cwd=REPO, capture_output=True, text=True, check=True)
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-o", str(exe), str(c)]), check=True)
+        cres = subprocess.run(source_link.locked([str(exe)]), capture_output=True, text=True)
+    bres = subprocess.run(source_link.locked([source_link.bend(), TABLE]), cwd=REPO, capture_output=True, text=True,
+                          check=True)
     same = cres.stdout == bres.stdout
     print(cres.stderr.strip() or f"C table program exit status {cres.returncode}")
     print(f"table lines: C {len(cres.stdout.splitlines())}, Bend {len(bres.stdout.splitlines())}; byte-identical: {same}")

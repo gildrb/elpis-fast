@@ -17,6 +17,7 @@ Differential evidence on finite instances, not a proof. `--mutate NAME` applies 
 mutation that the check must reject.
 
 Usage: python3 bend/pattn_sched_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
+  ENGINE_PACKAGE_DIR: OUT/patched of bend/engine_trees.py.
 """
 from __future__ import annotations
 
@@ -26,8 +27,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/PATTN_SCHED_TABLE.bend"
 # (L, q_len) chunks: must match main() of PATTN_SCHED_TABLE.bend
 CASES = [(1, 1), (17, 5), (31, 16), (32, 17), (33, 33), (47, 20), (64, 64), (65, 16), (100, 37), (130, 3), (62, 32), (81, 19)]
@@ -192,9 +196,10 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(cu))
         exe = Path(td) / "diff"
-        subprocess.run(["/tmp/cpu-lock.sh", "c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)], check=True)
-        cres = subprocess.run(["/tmp/cpu-lock.sh", str(exe)], capture_output=True, text=True)
-    bres = subprocess.run(["/tmp/cpu-lock.sh", BEND, TABLE], cwd=REPO, capture_output=True, text=True, check=True)
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)]), check=True)
+        cres = subprocess.run(source_link.locked([str(exe)]), capture_output=True, text=True)
+    bres = subprocess.run(source_link.locked([source_link.bend(), TABLE]), cwd=REPO, capture_output=True, text=True,
+                          check=True)
     same = cres.stdout == bres.stdout
     print(cres.stderr.strip() or f"C table program exit status {cres.returncode}")
     print(f"table lines: C {len(cres.stdout.splitlines())}, Bend {len(bres.stdout.splitlines())}; byte-identical: {same}")

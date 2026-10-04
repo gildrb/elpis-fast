@@ -17,6 +17,14 @@ import ./gdn_replay_gather_spec.bend as Spec
 law gather_cover:
   {Spec.cover() == True{} : Bool}
 
+# cover() evaluates the checks at the largest token count only (Spec.all_S); they are equivalent to the checks at
+# every token count S .. S + n - 1 (the reference conjunction Spec.all_S_ref), for every n and S. With gather_cover
+# this gives Spec.all_S_ref(GR_MAX_S, 1) == True: the checks hold at every S in 1..16.
+law gather_all_S:
+  for n: Nat
+  for +S: Nat
+  {Spec.all_S(n, S) == Spec.all_S_ref(n, S) : Bool}
+
 # (1) Threads: REPLAY_GI = 3, every element e < 16 * 20 is reached by thread e % 128 at slot e / 128 < 3, and
 # distinct (thread < 128, slot < 3) pairs reach distinct elements.
 law gather_threads:

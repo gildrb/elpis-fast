@@ -1,4 +1,164 @@
-# DRAM roofline of one greedy speculative verify round (M = 8 target rows)
+"""Emit bend/roofline.bend from the safetensors-header inventory.
+
+Byte constants are written as decimal digit lists (Bin.dec) so the checker
+evaluates them in binary.
+
+Input: bend/gen/roofline_inventory.json (or --inventory PATH). It holds the byte
+count of each tensor kind. bend/gen/roofline_inventory.py makes it from the
+safetensors headers of the target and draft models.
+Output: the Bend source, on stdout.
+
+Regenerate and check the tracked file (from the repository root):
+    python3 -I -B bend/gen/roofline_impl.py > /tmp/x && cmp /tmp/x bend/roofline.bend
+
+Origin: the generator of the roofline work. Only the input path handling, the
+generator lines of the header, the value check and the UTF-8 output changed.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+parser = argparse.ArgumentParser(description="Emit bend/roofline.bend on stdout.")
+parser.add_argument(
+    "--inventory",
+    type=Path,
+    default=ROOT / "bend/gen/roofline_inventory.json",
+    help="inventory JSON (default: bend/gen/roofline_inventory.json)",
+)
+C = json.loads(parser.parse_args().inventory.read_text(encoding="utf-8"))
+
+
+def dg(n: int) -> str:
+    return "[" + ", ".join(f"{c}n" for c in str(n)) + "]"
+
+
+def const(name: str, value: int, cite: str) -> str:
+    if type(value) is not int or value < 0:
+        raise SystemExit(f"roofline_impl: FAIL: {name}: {value!r} is not a byte count")
+    return f"# {cite}\ndef {name}() -> N.Bin:\n  N.Bin.dec({dg(value)})\n"
+
+
+TENSORS = [
+    # (bend name, inventory key, citation)
+    (
+        "mlp_gate",
+        "mlp_gate",
+        "layers.*.mlp.gate_proj.{trellis [320,1088,64] I16, suh [5120], svh [17408] F16}",
+    ),
+    ("mlp_up", "mlp_up", "layers.*.mlp.up_proj.{trellis [320,1088,64] I16, suh, svh}"),
+    (
+        "mlp_down",
+        "mlp_down",
+        "layers.*.mlp.down_proj.{trellis [1088,320,64] I16, suh [17408], svh [5120]}",
+    ),
+    ("ln_in", "ln_in", "layers.*.input_layernorm.weight [5120] BF16"),
+    ("ln_post", "ln_post", "layers.*.post_attention_layernorm.weight [5120] BF16"),
+    (
+        "gdn_qkv",
+        "gdn_qkv",
+        "linear_attn.in_proj_qkv.{trellis [320,640,64] I16, suh [5120], svh [10240]}",
+    ),
+    (
+        "gdn_z",
+        "gdn_z",
+        "linear_attn.in_proj_z.{trellis [320,384,64] I16, suh [5120], svh [6144]}",
+    ),
+    (
+        "gdn_out",
+        "gdn_out",
+        "linear_attn.out_proj.{trellis [384,320,64] I16, suh [6144], svh [5120]}",
+    ),
+    ("gdn_a", "gdn_a", "linear_attn.in_proj_a.weight [48,5120] F16"),
+    ("gdn_b", "gdn_b", "linear_attn.in_proj_b.weight [48,5120] F16"),
+    ("gdn_conv1d", "gdn_conv1d", "linear_attn.conv1d.weight [10240,1,4] BF16"),
+    ("gdn_alog", "gdn_alog", "linear_attn.A_log [48] BF16"),
+    ("gdn_dtb", "gdn_dtb", "linear_attn.dt_bias [48] BF16"),
+    ("gdn_norm", "gdn_norm", "linear_attn.norm.weight [128] BF16"),
+    (
+        "attn_q",
+        "attn_q",
+        "self_attn.q_proj.{trellis [320,768,64] I16, suh [5120], svh [12288]}",
+    ),
+    (
+        "attn_k",
+        "attn_k",
+        "self_attn.k_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+    ),
+    (
+        "attn_v",
+        "attn_v",
+        "self_attn.v_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+    ),
+    (
+        "attn_o",
+        "attn_o",
+        "self_attn.o_proj.{trellis [384,320,64] I16, suh [6144], svh [5120]}",
+    ),
+    ("attn_qn", "attn_qn", "self_attn.q_norm.weight [256] BF16"),
+    ("attn_kn", "attn_kn", "self_attn.k_norm.weight [256] BF16"),
+    ("final_norm", "final_norm", "model.language_model.norm.weight [5120] BF16"),
+    (
+        "head",
+        "head",
+        "lm_head.{trellis [320,15520,96] I16 (6 bpw), suh [5120], svh [248320] F16}",
+    ),
+    (
+        "d_q",
+        "d_q",
+        "draft layers.*.self_attn.q_proj.{trellis [320,256,64] I16, suh [5120], svh [4096]}",
+    ),
+    (
+        "d_k",
+        "d_k",
+        "draft layers.*.self_attn.k_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+    ),
+    (
+        "d_v",
+        "d_v",
+        "draft layers.*.self_attn.v_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+    ),
+    (
+        "d_o",
+        "d_o",
+        "draft layers.*.self_attn.o_proj.{trellis [256,320,64] I16, suh [4096], svh [5120]}",
+    ),
+    ("d_gate", "d_gate", "draft layers.*.mlp.gate_proj (as target)"),
+    ("d_up", "d_up", "draft layers.*.mlp.up_proj (as target)"),
+    ("d_down", "d_down", "draft layers.*.mlp.down_proj (as target)"),
+    (
+        "d_akp",
+        "d_akp",
+        "draft layers.*.attention_conv.kernel_projection.weight [1280,5120] F16",
+    ),
+    (
+        "d_mkp",
+        "d_mkp",
+        "draft layers.*.mlp_conv.kernel_projection.weight [1280,5120] F16",
+    ),
+    ("d_abk", "d_abk", "draft layers.*.attention_conv.base_kernel [2,2,5120] F16"),
+    ("d_mbk", "d_mbk", "draft layers.*.mlp_conv.base_kernel [2,2,5120] F16"),
+    ("d_ln_in", "d_ln_in", "draft layers.*.input_layernorm.weight [5120] BF16"),
+    (
+        "d_ln_post",
+        "d_ln_post",
+        "draft layers.*.post_attention_layernorm.weight [5120] BF16",
+    ),
+    ("d_qn", "d_qn", "draft layers.*.self_attn.q_norm.weight [128] BF16"),
+    ("d_kn", "d_kn", "draft layers.*.self_attn.k_norm.weight [128] BF16"),
+    ("d_norm", "d_norm", "draft norm.weight [5120] BF16"),
+    ("d_hnorm", "d_hnorm", "draft hidden_norm.weight [5120] BF16"),
+    ("d_fc", "d_fc", "draft fc.{trellis [1600,320,64] I16, suh [25600], svh [5120]}"),
+    (
+        "d_hproj",
+        "d_hproj",
+        "draft candidate_selector.hidden_projection.weight [256,5120] F16",
+    ),
+]
+
+HEAD = """# DRAM roofline of one greedy speculative verify round (M = 8 target rows)
 # of the committed g7n engine: the bytes each round moves, as the linear form
 # bytes(d, c, w) = c0 + kd*d + kc*c + kw*w of the committed depth d, the round's
 # committed count c (1..8) and the draft window read w = min(d + 8, 2056)
@@ -54,172 +214,9 @@ def plus(xs: List<&2, N.Bin>) -> N.Bin:
       N.Bin.add(x, plus(rest))
 
 # ---- tensor bytes (safetensors headers) ----
+"""
 
-# layers.*.mlp.gate_proj.{trellis [320,1088,64] I16, suh [5120], svh [17408] F16}
-def mlp_gate() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# layers.*.mlp.up_proj.{trellis [320,1088,64] I16, suh, svh}
-def mlp_up() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# layers.*.mlp.down_proj.{trellis [1088,320,64] I16, suh [17408], svh [5120]}
-def mlp_down() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# layers.*.input_layernorm.weight [5120] BF16
-def ln_in() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# layers.*.post_attention_layernorm.weight [5120] BF16
-def ln_post() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# linear_attn.in_proj_qkv.{trellis [320,640,64] I16, suh [5120], svh [10240]}
-def gdn_qkv() -> N.Bin:
-  N.Bin.dec([2n, 6n, 2n, 4n, 5n, 1n, 2n, 0n])
-
-# linear_attn.in_proj_z.{trellis [320,384,64] I16, suh [5120], svh [6144]}
-def gdn_z() -> N.Bin:
-  N.Bin.dec([1n, 5n, 7n, 5n, 1n, 1n, 6n, 8n])
-
-# linear_attn.out_proj.{trellis [384,320,64] I16, suh [6144], svh [5120]}
-def gdn_out() -> N.Bin:
-  N.Bin.dec([1n, 5n, 7n, 5n, 1n, 1n, 6n, 8n])
-
-# linear_attn.in_proj_a.weight [48,5120] F16
-def gdn_a() -> N.Bin:
-  N.Bin.dec([4n, 9n, 1n, 5n, 2n, 0n])
-
-# linear_attn.in_proj_b.weight [48,5120] F16
-def gdn_b() -> N.Bin:
-  N.Bin.dec([4n, 9n, 1n, 5n, 2n, 0n])
-
-# linear_attn.conv1d.weight [10240,1,4] BF16
-def gdn_conv1d() -> N.Bin:
-  N.Bin.dec([8n, 1n, 9n, 2n, 0n])
-
-# linear_attn.A_log [48] BF16
-def gdn_alog() -> N.Bin:
-  N.Bin.dec([9n, 6n])
-
-# linear_attn.dt_bias [48] BF16
-def gdn_dtb() -> N.Bin:
-  N.Bin.dec([9n, 6n])
-
-# linear_attn.norm.weight [128] BF16
-def gdn_norm() -> N.Bin:
-  N.Bin.dec([2n, 5n, 6n])
-
-# self_attn.q_proj.{trellis [320,768,64] I16, suh [5120], svh [12288]}
-def attn_q() -> N.Bin:
-  N.Bin.dec([3n, 1n, 4n, 9n, 2n, 0n, 9n, 6n])
-
-# self_attn.k_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}
-def attn_k() -> N.Bin:
-  N.Bin.dec([2n, 6n, 3n, 3n, 7n, 2n, 8n])
-
-# self_attn.v_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}
-def attn_v() -> N.Bin:
-  N.Bin.dec([2n, 6n, 3n, 3n, 7n, 2n, 8n])
-
-# self_attn.o_proj.{trellis [384,320,64] I16, suh [6144], svh [5120]}
-def attn_o() -> N.Bin:
-  N.Bin.dec([1n, 5n, 7n, 5n, 1n, 1n, 6n, 8n])
-
-# self_attn.q_norm.weight [256] BF16
-def attn_qn() -> N.Bin:
-  N.Bin.dec([5n, 1n, 2n])
-
-# self_attn.k_norm.weight [256] BF16
-def attn_kn() -> N.Bin:
-  N.Bin.dec([5n, 1n, 2n])
-
-# model.language_model.norm.weight [5120] BF16
-def final_norm() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# lm_head.{trellis [320,15520,96] I16 (6 bpw), suh [5120], svh [248320] F16}
-def head() -> N.Bin:
-  N.Bin.dec([9n, 5n, 4n, 0n, 5n, 5n, 6n, 8n, 0n])
-
-# draft layers.*.self_attn.q_proj.{trellis [320,256,64] I16, suh [5120], svh [4096]}
-def d_q() -> N.Bin:
-  N.Bin.dec([1n, 0n, 5n, 0n, 4n, 1n, 9n, 2n])
-
-# draft layers.*.self_attn.k_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}
-def d_k() -> N.Bin:
-  N.Bin.dec([2n, 6n, 3n, 3n, 7n, 2n, 8n])
-
-# draft layers.*.self_attn.v_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}
-def d_v() -> N.Bin:
-  N.Bin.dec([2n, 6n, 3n, 3n, 7n, 2n, 8n])
-
-# draft layers.*.self_attn.o_proj.{trellis [256,320,64] I16, suh [4096], svh [5120]}
-def d_o() -> N.Bin:
-  N.Bin.dec([1n, 0n, 5n, 0n, 4n, 1n, 9n, 2n])
-
-# draft layers.*.mlp.gate_proj (as target)
-def d_gate() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# draft layers.*.mlp.up_proj (as target)
-def d_up() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# draft layers.*.mlp.down_proj (as target)
-def d_down() -> N.Bin:
-  N.Bin.dec([4n, 4n, 6n, 0n, 9n, 5n, 3n, 6n])
-
-# draft layers.*.attention_conv.kernel_projection.weight [1280,5120] F16
-def d_akp() -> N.Bin:
-  N.Bin.dec([1n, 3n, 1n, 0n, 7n, 2n, 0n, 0n])
-
-# draft layers.*.mlp_conv.kernel_projection.weight [1280,5120] F16
-def d_mkp() -> N.Bin:
-  N.Bin.dec([1n, 3n, 1n, 0n, 7n, 2n, 0n, 0n])
-
-# draft layers.*.attention_conv.base_kernel [2,2,5120] F16
-def d_abk() -> N.Bin:
-  N.Bin.dec([4n, 0n, 9n, 6n, 0n])
-
-# draft layers.*.mlp_conv.base_kernel [2,2,5120] F16
-def d_mbk() -> N.Bin:
-  N.Bin.dec([4n, 0n, 9n, 6n, 0n])
-
-# draft layers.*.input_layernorm.weight [5120] BF16
-def d_ln_in() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# draft layers.*.post_attention_layernorm.weight [5120] BF16
-def d_ln_post() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# draft layers.*.self_attn.q_norm.weight [128] BF16
-def d_qn() -> N.Bin:
-  N.Bin.dec([2n, 5n, 6n])
-
-# draft layers.*.self_attn.k_norm.weight [128] BF16
-def d_kn() -> N.Bin:
-  N.Bin.dec([2n, 5n, 6n])
-
-# draft norm.weight [5120] BF16
-def d_norm() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# draft hidden_norm.weight [5120] BF16
-def d_hnorm() -> N.Bin:
-  N.Bin.dec([1n, 0n, 2n, 4n, 0n])
-
-# draft fc.{trellis [1600,320,64] I16, suh [25600], svh [5120]}
-def d_fc() -> N.Bin:
-  N.Bin.dec([6n, 5n, 5n, 9n, 7n, 4n, 4n, 0n])
-
-# draft candidate_selector.hidden_projection.weight [256,5120] F16
-def d_hproj() -> N.Bin:
-  N.Bin.dec([2n, 6n, 2n, 1n, 4n, 4n, 0n])
-
-
+BODY = """
 # ---- traffic bytes (layouts above) ----
 # CQ3 K + V bytes per token per target attention layer.
 def kv_tok() -> N.Bin:
@@ -379,3 +376,10 @@ def trace_target_gemm_bytes() -> N.Bin:
 # kernel_trace.py draft_forward_linears: q, k, v, o, gate, up, down of 5 layers.
 def trace_draft_linears() -> N.Bin:
   times(5n, plus([d_q(), d_k(), d_v(), d_o(), d_gate(), d_up(), d_down()]))
+"""
+
+out = [HEAD]
+for name, key, cite in TENSORS:
+    out.append(const(name, C[key], cite))
+out.append(BODY)
+sys.stdout.buffer.write("\n".join(out).encode("utf-8"))

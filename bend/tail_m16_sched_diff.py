@@ -21,8 +21,11 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/TAIL_M16_SCHED_TABLE.bend"
 PATCH = "patches/exl3-ext/8202-layer-tail-on2102.patch"
 HEADER = "exllamav3_ext/quant/exl3_tail_m16_sched.h"
@@ -80,7 +83,7 @@ def main(argv: list[str]) -> int:
         fail(f"patch {patch_path} is absent")
     patch = patch_path.read_bytes()
     expected = patch_header(patch)
-    bend = run([BEND, TABLE])
+    bend = run(source_link.locked([source_link.bend(), TABLE]))
     if not bend:
         fail("the Bend emitter printed nothing")
     print(f"patch {patch_path} sha256 {hashlib.sha256(patch).hexdigest()}")

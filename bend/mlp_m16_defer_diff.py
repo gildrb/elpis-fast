@@ -16,6 +16,7 @@ Differential check of ext 8204's deferred phase-1 publish (bend/mlp_m16_defer.be
 Exit status 0 iff everything holds. Mutations (--mutate NAME) must make it fail.
 
 Usage: python3 -B bend/mlp_m16_defer_diff.py TREE [--mutate first_lane|last_group|no_pub_last]
+  TREE: OUT/patched of bend/engine_trees.py.
 """
 
 from __future__ import annotations
@@ -25,8 +26,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 G, KT1, PF = 164, 5120 // 16, 8
 
 BLOCK = """            if (!{P}.defer_pub)
@@ -107,7 +111,8 @@ def main(argv: list[str]) -> int:
     print(f"lane rule == model signal groups, fired once at the last flush, <= 32 groups: all {n_blocks} blocks")
     for tab, hdr in (("bend/MLP_M16_SCHED_TABLE.bend", "exl3_mlp_m16_sched.h"),
                      ("bend/TAIL_M16_SCHED_TABLE.bend", "exl3_tail_m16_sched.h")):
-        out = subprocess.run([BEND, tab], cwd=REPO, capture_output=True, timeout=3600, check=False)
+        out = subprocess.run(source_link.locked([source_link.bend(), tab]), cwd=REPO, capture_output=True, timeout=3600,
+                             check=False)
         if out.returncode != 0:
             fail(f"{tab} exited {out.returncode}")
         if out.stdout != (quant / hdr).read_bytes():

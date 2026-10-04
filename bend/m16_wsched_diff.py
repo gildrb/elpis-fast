@@ -4,20 +4,21 @@ Differential check of ext 8205's slot-weighted 8201 / 8202 schedule tables.
 
 Runs the Bend emitter bend/M16_WSCHED_TABLE.bend (Nat model bend/m16_wsched.bend over the shared partition
 bend/gemm_m16_wpart.bend) and compares every printed table, byte for byte as a list of uint16 values, with
-  1. the independent Python reference gen_sched.py (flat(), over M16gEff's wpart.py formula), and
+  1. the independent Python reference bend/gen/m16_wsched_ref.py (flat(), over the bend/gen/wpart.py formula), and
   2. with --tree TREE: the host builder the extension ships, exllamav3_ext/quant/exl3_m16_wsched.h of TREE,
-     compiled into a small driver (g++ on the host, else inside the gemm-tu-check:tmp container), and the
+     compiled into a small driver (c++ from PATH; the dev shell gives clang), and the
      uniform-weight tables' 8201 / tail sections against the Bend-baked headers exl3_mlp_m16_sched.h /
      exl3_tail_m16_sched.h of TREE (the extension checks the same at runtime and fails closed).
 Exit status 0 iff every comparison is IDENTICAL.
 
 Usage: python3 -B bend/m16_wsched_diff.py [--reference GEN_SCHED_PY] [--tree TREE]
+  GEN_SCHED_PY: the independent Python reference (default: the tracked bend/gen/m16_wsched_ref.py).
+  TREE: OUT/patched of bend/engine_trees.py.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import os
 import re
 import shutil
 import subprocess
@@ -25,10 +26,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/M16_WSCHED_TABLE.bend"
-DEFAULT_REFERENCE = "/tmp/kernel-work/TailV2b/gen_sched.py"
+DEFAULT_REFERENCE = REPO / "bend/gen/m16_wsched_ref.py"
 G, BF, NP, PFLD, TBF, HDR = 164, 11, 34, 5, 4, 8
 
 DRIVER = r'''
@@ -51,7 +55,7 @@ def fail(msg: str) -> None:
 
 
 def bend_tables() -> list[tuple[int, list[int], list[int]]]:
-    proc = subprocess.run([BEND, TABLE], cwd=REPO, capture_output=True, timeout=3600, check=False)
+    proc = subprocess.run([source_link.bend(), TABLE], cwd=REPO, capture_output=True, timeout=3600, check=False)
     if proc.returncode != 0:
         fail(f"{TABLE} exited {proc.returncode}: {proc.stderr.decode(errors='replace')[:500]}")
     out = []
@@ -79,15 +83,11 @@ def build_driver(tree: Path) -> list[str]:
     work = Path(tempfile.mkdtemp(prefix="m16_wsched_diff_"))
     (work / "drv.cpp").write_text(DRIVER)
     shutil.copy(quant / "exl3_m16_wsched.h", work / "exl3_m16_wsched.h")
-    if shutil.which("g++"):
-        subprocess.run(["g++", "-O2", "-std=c++17", "-o", str(work / "drv"), str(work / "drv.cpp")], check=True)
-        return [str(work / "drv")]
-    os.chmod(work, 0o777)
-    subprocess.run(["docker", "run", "--rm", "--network", "none", "-v", f"{work}:/w", "--entrypoint", "bash",
-                    "gemm-tu-check:tmp", "-c", "g++ -O2 -std=c++17 -o /w/drv /w/drv.cpp && chmod 755 /w/drv"], check=True)
-    if subprocess.run([str(work / "drv"), "0", "1", "1", "1", "1", "1", "1"], capture_output=True).returncode == 0:
-        return [str(work / "drv")]
-    return ["docker", "run", "--rm", "--network", "none", "-v", f"{work}:/w", "--entrypoint", "/w/drv", "gemm-tu-check:tmp"]
+    cxx = shutil.which("c++")
+    if cxx is None:
+        fail("c++ is not on PATH (run inside `nix develop --offline --no-write-lock-file`)")
+    subprocess.run([cxx, "-O2", "-std=c++17", "-o", str(work / "drv"), str(work / "drv.cpp")], check=True)
+    return [str(work / "drv")]
 
 
 def header_table(text: str, name: str) -> list[int]:
@@ -98,7 +98,7 @@ def header_table(text: str, name: str) -> list[int]:
 
 
 def main(argv: list[str]) -> int:
-    ref_path = argv[argv.index("--reference") + 1] if "--reference" in argv else DEFAULT_REFERENCE
+    ref_path = argv[argv.index("--reference") + 1] if "--reference" in argv else str(DEFAULT_REFERENCE)
     tree = Path(argv[argv.index("--tree") + 1]) if "--tree" in argv else None
     ref = load_reference(ref_path)
     tables = bend_tables()

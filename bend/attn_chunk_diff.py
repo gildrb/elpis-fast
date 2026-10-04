@@ -28,6 +28,8 @@ Differential evidence on finite instances, not a proof. `--mutate NAME` applies 
 source mutation that the check must reject.
 
 Usage: python3 bend/attn_chunk_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
+  ENGINE_PACKAGE_DIR: OUT/patched of bend/engine_trees.py --through 3003-attn-verify-cuda.patch
+  (any prefix with 3003 and without 3006).
 """
 
 from __future__ import annotations
@@ -38,8 +40,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/ATTN_CHUNK_TABLE.bend"
 
 # Section A (CTA partition) / T (chunk tiles) / B (row merge lists): (L, chunk, S) cases. Must
@@ -389,10 +394,11 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(src["cuh"], src["cu"], src["gr"], src["cpp"]))
         exe = Path(td) / "diff"
-        subprocess.run(["c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)], check=True)
-        cres = subprocess.run([str(exe)], capture_output=True, text=True)
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-w", "-o", str(exe), str(c)]), check=True)
+        cres = subprocess.run(source_link.locked([str(exe)]), capture_output=True, text=True)
     ctext = cres.stdout + "".join(line + "\n" for line in host_lines(src["py"]))
-    bres = subprocess.run([BEND, TABLE], cwd=REPO, capture_output=True, text=True, check=True)
+    bres = subprocess.run(source_link.locked([source_link.bend(), TABLE]), cwd=REPO, capture_output=True, text=True,
+                          check=True)
     same = ctext == bres.stdout
     print(cres.stderr.strip() or f"C table program exit status {cres.returncode}")
     print(f"table lines: C+host {len(ctext.splitlines())}, Bend {len(bres.stdout.splitlines())}; byte-identical: {same}")

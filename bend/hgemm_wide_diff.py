@@ -10,17 +10,16 @@ patch 3011 (exllamav3_ext/hgemm_f16acc_wide.cuh and hgemm_f16acc.cu, post-patch)
    values), grid_m at 7 values of M.
 3. HGEMM_WIDE_TABLE.bend is compiled with the pinned bend and run; the two tables must be identical.
 
-usage: hgemm_wide_diff.py [EXT_DIR]   (EXT_DIR: patched exllamav3_ext; default: the scratch pin tree)
+usage: hgemm_wide_diff.py EXT_DIR   (EXT_DIR: exllamav3_ext of OUT/patched of bend/engine_trees.py)
 Exit 0 and "hgemm_wide_diff: OK" iff all three steps pass."""
-import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BEND = os.environ.get("BEND", "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend")
-EXT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/kernel-work/PrefillMap/gemm/pins.tree/exllamav3_ext")
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
 
 HDR_QUOTES = [
     "if constexpr (A_CPR == 4) pc = chunk ^ ((row >> 1) & 3);",
@@ -97,8 +96,11 @@ def extract(text, start, end):
 
 
 def main():
-    hdr = EXT / "hgemm_f16acc_wide.cuh"
-    cu = EXT / "hgemm_f16acc.cu"
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    ext = Path(sys.argv[1])
+    hdr = ext / "hgemm_f16acc_wide.cuh"
+    cu = ext / "hgemm_f16acc.cu"
     hl, cl = lines_of(hdr), lines_of(cu)
     need(HDR_QUOTES + CFG_QUOTES, hl, hdr.name)
     need(CU_QUOTES, cl, cu.name)
@@ -245,13 +247,15 @@ int main() {
         src = Path(td) / "hw_ref.cpp"
         src.write_text(prog)
         exe = Path(td) / "hw_ref"
-        r = subprocess.run(["c++", "-std=c++17", "-O1", "-o", str(exe), str(src)], capture_output=True, text=True)
+        r = subprocess.run(source_link.locked(["c++", "-std=c++17", "-O1", "-o", str(exe), str(src)]), capture_output=True,
+                           text=True)
         if r.returncode:
             print("hgemm_wide_diff: FAIL: reference program does not compile:\n" + r.stderr[-3000:])
             sys.exit(1)
         ref = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout
         tb = Path(td) / "hw_table"
-        r = subprocess.run([BEND, str(HERE / "HGEMM_WIDE_TABLE.bend"), "-o", str(tb)], capture_output=True, text=True, cwd=HERE)
+        r = subprocess.run(source_link.locked([source_link.bend(), str(HERE / "HGEMM_WIDE_TABLE.bend"), "-o", str(tb)]),
+                           capture_output=True, text=True, cwd=HERE)
         if r.returncode:
             print("hgemm_wide_diff: FAIL: bend table build failed:\n" + (r.stdout + r.stderr)[-3000:])
             sys.exit(1)

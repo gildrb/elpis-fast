@@ -22,7 +22,8 @@ slice; max_contrib == brute contributor count; seeded random weighted configurat
 configuration with an empty slice is rejected; owner_le equivalence (exhaustive on a bounded domain).
 Differential evidence on finite instances, not a proof.
 
-Usage: python3 bend/gemm_m16_wpart_diff.py [--mutate NAME | --all-mutations] [TREE]
+Usage: python3 bend/gemm_m16_wpart_diff.py [--mutate NAME | --all-mutations] TREE
+  TREE: OUT/patched of bend/engine_trees.py.
 """
 
 from __future__ import annotations
@@ -36,16 +37,15 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = Path("/home/gilrodrigues/Repos/elpis")
-TREE_DEFAULT = Path("/tmp/kernel-work/WpartBend2/tree")
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 PATCH = REPO / "patches/exl3-ext/2105-proj-m16g-weighted-on9003b.patch"
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
 TABLE = "GEMM_M16_WPART_TABLE.bend"
 IMPL = "gemm_m16_wpart.bend"
 # the Bend sources compile from the dev dir (repo bend/*.bend + links to ours) when present
 BEND_CWD = HERE.parent / "dev" if (HERE.parent / "dev" / TABLE).exists() else HERE
-LOCK = ["/tmp/cpu-lock.sh"] if Path("/tmp/cpu-lock.sh").exists() else \
-    ["flock", "-s", "/tmp/elpis-gpu.lock", "nice", "-n", "19"]
 
 H_PATH = "exllamav3_ext/quant/exl3_gemm_m16g.cu"
 K_PATH = "exllamav3_ext/quant/exl3_gemm_m16g_kernel.cuh"
@@ -592,16 +592,17 @@ def main(argv: list[str]) -> None:
     args = argv[1:]
     mutate = None
     if args[:1] == ["--all-mutations"]:
-        tree = args[1] if len(args) > 1 else str(TREE_DEFAULT)
-        sys.exit(run_all_mutations(tree))
+        if len(args) != 2:
+            fail(__doc__)
+        sys.exit(run_all_mutations(args[1]))
     if args[:1] == ["--mutate"]:
         if len(args) < 2 or args[1] not in MUTATIONS:
             fail(f"--mutate NAME, NAME in {sorted(MUTATIONS)}")
         mutate = args[1]
         args = args[2:]
-    if len(args) > 1:
+    if len(args) != 1:
         fail(__doc__)
-    tree = Path(args[0] if args else TREE_DEFAULT)
+    tree = Path(args[0])
     src = {"H": (tree / H_PATH).read_text(), "K": (tree / K_PATH).read_text(), "V2": (tree / V2_PATH).read_text()}
     fpath = {"H": H_PATH, "K": K_PATH, "V2": V2_PATH}
     lines = {f: t.split("\n") for f, t in src.items()}
@@ -662,10 +663,11 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "wpart.cpp"
         c.write_text(c_program(q, q_orig))
         exe = Path(td) / "wpart"
-        subprocess.run(LOCK + ["c++", "-O2", "-std=c++17", "-Wall", "-Wno-unused-function", "-o", str(exe), str(c)],
+        subprocess.run(source_link.locked(["c++", "-O2", "-std=c++17", "-Wall", "-Wno-unused-function", "-o", str(exe), str(c)]),
                        check=True)
         tab = Path(td) / "table"
-        r = subprocess.run(LOCK + [BEND, TABLE, "-o", str(tab)], cwd=BEND_CWD, capture_output=True, text=True)
+        r = subprocess.run(source_link.locked([source_link.bend(), TABLE, "-o", str(tab)]), cwd=BEND_CWD,
+                           capture_output=True, text=True)
         if r.returncode != 0:
             fail(f"bend compile: {r.stdout}{r.stderr}")
         cres = subprocess.run([str(exe)], capture_output=True, text=True)

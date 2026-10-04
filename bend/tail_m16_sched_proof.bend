@@ -1070,10 +1070,159 @@ def total0_served(+A: Nat, +H: Nat, sa: {A == Impl.kin() : Nat}, sh: {H == Impl.
   %Equal.sym(Nat, H, Impl.hidden(), sh) : {Impl.total0(Impl.kin(), _) == Nat.mul(960n, 4n) : Nat}
   {==}
 
+# owner(x, T, G) == q - 1 from the division identity (x + 1) G + T - 1 == q T + R with R < T, so
+# the checker never runs the unary division.
+def own_at(+x: Nat, +T: Nat, +G: Nat, +q: Nat, +R: Nat,
+    e: {Nat.sub(Nat.add(Nat.mul(1n+x, G), T), 1n) == Nat.add(Nat.mul(q, T), R) : Nat},
+    rlt: {Nat.is_lt(R, T) == True{} : Bool})
+  -> {Part.owner(x, T, G) == Nat.sub(q, 1n) : Nat}:
+  %Equal.sym(Nat, Nat.sub(Nat.add(Nat.mul(1n+x, G), T), 1n), Nat.add(Nat.mul(q, T), R), e)
+    : {Nat.sub(Nat.div(_, T), 1n) == Nat.sub(q, 1n) : Nat}
+  %Equal.sym(Nat, Nat.div(Nat.add(Nat.mul(q, T), R), T), q,
+      PP.ard_fst({Nat.div(Nat.add(Nat.mul(q, T), R), T) == q : Nat},
+        {Nat.mod(Nat.add(Nat.mul(q, T), R), T) == R : Nat}, PP.ar_div_unique(q, R, T, rlt)))
+    : {Nat.sub(_, 1n) == Nat.sub(q, 1n) : Nat}
+  {==}
+
+# One max_contrib.go step from the group's owner values h (last k-tile) and l (first k-tile).
+def mc_step(+rest: Nat, +g: Nat, +KT: Nat, +T: Nat, +G: Nat, +mc: Nat, +h: Nat, +l: Nat, +mc2: Nat,
+    eh: {Part.owner(Nat.sub(Nat.mul(1n+g, KT), 1n), T, G) == h : Nat},
+    el: {Part.owner(Nat.mul(g, KT), T, G) == l : Nat},
+    ep: {Part.max_contrib.pick(Nat.is_gt(Nat.add(Nat.sub(h, l), 1n), mc), Nat.add(Nat.sub(h, l), 1n), mc) ==
+      mc2 : Nat})
+  -> {Part.max_contrib.go(1n+rest, g, KT, T, G, mc) == Part.max_contrib.go(rest, 1n+g, KT, T, G, mc2) : Nat}:
+  +OH = Part.owner(Nat.sub(Nat.mul(1n+g, KT), 1n), T, G)
+  +OL = Part.owner(Nat.mul(g, KT), T, G)
+  +P = Part.max_contrib.pick(Nat.is_gt(Nat.add(Nat.sub(h, l), 1n), mc), Nat.add(Nat.sub(h, l), 1n), mc)
+  %Equal.sym(Nat, mc2, P, Equal.sym(Nat, P, mc2, ep))
+    : {Part.max_contrib.go(1n+rest, g, KT, T, G, mc) == Part.max_contrib.go(rest, 1n+g, KT, T, G, _) : Nat}
+  %Equal.sym(Nat, h, OH, Equal.sym(Nat, OH, h, eh))
+    : {Part.max_contrib.go(1n+rest, g, KT, T, G, mc) == Part.max_contrib.go(rest, 1n+g, KT, T, G,
+        Part.max_contrib.pick(Nat.is_gt(Nat.add(Nat.sub(_, l), 1n), mc), Nat.add(Nat.sub(_, l), 1n), mc)) : Nat}
+  %Equal.sym(Nat, l, OL, Equal.sym(Nat, OL, l, el))
+    : {Part.max_contrib.go(1n+rest, g, KT, T, G, mc) == Part.max_contrib.go(rest, 1n+g, KT, T, G,
+        Part.max_contrib.pick(Nat.is_gt(Nat.add(Nat.sub(OH, _), 1n), mc), Nat.add(Nat.sub(OH, _), 1n), mc)) : Nat}
+  {==}
+
+# owner of the last / first k-tile of group g at KT = 384, T = 960, G = 41.
+def own_hi(+g: Nat, +q: Nat, +R: Nat,
+    e: {Nat.sub(Nat.add(Nat.mul(1n+Nat.sub(Nat.mul(1n+g, 384n), 1n), 41n), 960n), 1n) ==
+      Nat.add(Nat.mul(q, 960n), R) : Nat},
+    rlt: {Nat.is_lt(R, 960n) == True{} : Bool})
+  -> {Part.owner(Nat.sub(Nat.mul(1n+g, 384n), 1n), 960n, 41n) == Nat.sub(q, 1n) : Nat}:
+  own_at(Nat.sub(Nat.mul(1n+g, 384n), 1n), 960n, 41n, q, R, e, rlt)
+
+def own_lo(+g: Nat, +q: Nat, +R: Nat,
+    e: {Nat.sub(Nat.add(Nat.mul(1n+Nat.mul(g, 384n), 41n), 960n), 1n) == Nat.add(Nat.mul(q, 960n), R) : Nat},
+    rlt: {Nat.is_lt(R, 960n) == True{} : Bool})
+  -> {Part.owner(Nat.mul(g, 384n), 960n, 41n) == Nat.sub(q, 1n) : Nat}:
+  own_at(Nat.mul(g, 384n), 960n, 41n, q, R, e, rlt)
+
+# The ten groups at KT = 384, T = 960, G = 41: per-group contributor counts 17, 17, 18, 17, 17,
+# 17, 17, 18, 17, 17; one def per group so each step gets its own checker budget.
+def mc_s0() -> {Part.max_contrib.go(10n, 0n, 384n, 960n, 41n, 1n) ==
+    Part.max_contrib.go(9n, 1n, 384n, 960n, 41n, 17n) : Nat}:
+  mc_step(9n, 0n, 384n, 960n, 41n, 1n, Nat.sub(17n, 1n), Nat.sub(1n, 1n), 17n,
+    own_hi(0n, 17n, 383n, {==}, {==}), own_lo(0n, 1n, 40n, {==}, {==}), {==})
+
+def mc_s1() -> {Part.max_contrib.go(9n, 1n, 384n, 960n, 41n, 17n) ==
+    Part.max_contrib.go(8n, 2n, 384n, 960n, 41n, 17n) : Nat}:
+  mc_step(8n, 1n, 384n, 960n, 41n, 17n, Nat.sub(33n, 1n), Nat.sub(17n, 1n), 17n,
+    own_hi(1n, 33n, 767n, {==}, {==}), own_lo(1n, 17n, 424n, {==}, {==}), {==})
+
+def mc_s2() -> {Part.max_contrib.go(8n, 2n, 384n, 960n, 41n, 17n) ==
+    Part.max_contrib.go(7n, 3n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(7n, 2n, 384n, 960n, 41n, 17n, Nat.sub(50n, 1n), Nat.sub(33n, 1n), 18n,
+    own_hi(2n, 50n, 191n, {==}, {==}), own_lo(2n, 33n, 808n, {==}, {==}), {==})
+
+def mc_s3() -> {Part.max_contrib.go(7n, 3n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(6n, 4n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(6n, 3n, 384n, 960n, 41n, 18n, Nat.sub(66n, 1n), Nat.sub(50n, 1n), 18n,
+    own_hi(3n, 66n, 575n, {==}, {==}), own_lo(3n, 50n, 232n, {==}, {==}), {==})
+
+def mc_s4() -> {Part.max_contrib.go(6n, 4n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(5n, 5n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(5n, 4n, 384n, 960n, 41n, 18n, Nat.sub(82n, 1n), Nat.sub(66n, 1n), 18n,
+    own_hi(4n, 82n, 959n, {==}, {==}), own_lo(4n, 66n, 616n, {==}, {==}), {==})
+
+def mc_s5() -> {Part.max_contrib.go(5n, 5n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(4n, 6n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(4n, 5n, 384n, 960n, 41n, 18n, Nat.sub(99n, 1n), Nat.sub(83n, 1n), 18n,
+    own_hi(5n, 99n, 383n, {==}, {==}), own_lo(5n, 83n, 40n, {==}, {==}), {==})
+
+def mc_s6() -> {Part.max_contrib.go(4n, 6n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(3n, 7n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(3n, 6n, 384n, 960n, 41n, 18n, Nat.sub(115n, 1n), Nat.sub(99n, 1n), 18n,
+    own_hi(6n, 115n, 767n, {==}, {==}), own_lo(6n, 99n, 424n, {==}, {==}), {==})
+
+def mc_s7() -> {Part.max_contrib.go(3n, 7n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(2n, 8n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(2n, 7n, 384n, 960n, 41n, 18n, Nat.sub(132n, 1n), Nat.sub(115n, 1n), 18n,
+    own_hi(7n, 132n, 191n, {==}, {==}), own_lo(7n, 115n, 808n, {==}, {==}), {==})
+
+def mc_s8() -> {Part.max_contrib.go(2n, 8n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(1n, 9n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(1n, 8n, 384n, 960n, 41n, 18n, Nat.sub(148n, 1n), Nat.sub(132n, 1n), 18n,
+    own_hi(8n, 148n, 575n, {==}, {==}), own_lo(8n, 132n, 232n, {==}, {==}), {==})
+
+def mc_s9() -> {Part.max_contrib.go(1n, 9n, 384n, 960n, 41n, 18n) ==
+    Part.max_contrib.go(0n, 10n, 384n, 960n, 41n, 18n) : Nat}:
+  mc_step(0n, 9n, 384n, 960n, 41n, 18n, Nat.sub(164n, 1n), Nat.sub(148n, 1n), 18n,
+    own_hi(9n, 164n, 959n, {==}, {==}), own_lo(9n, 148n, 616n, {==}, {==}), {==})
+
+def mc_served_go() -> {Part.max_contrib.go(10n, 0n, 384n, 960n, 41n, 1n) == 18n : Nat}:
+  %Equal.sym(Nat, Part.max_contrib.go(10n, 0n, 384n, 960n, 41n, 1n),
+      Part.max_contrib.go(9n, 1n, 384n, 960n, 41n, 17n), mc_s0())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(9n, 1n, 384n, 960n, 41n, 17n),
+      Part.max_contrib.go(8n, 2n, 384n, 960n, 41n, 17n), mc_s1())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(8n, 2n, 384n, 960n, 41n, 17n),
+      Part.max_contrib.go(7n, 3n, 384n, 960n, 41n, 18n), mc_s2())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(7n, 3n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(6n, 4n, 384n, 960n, 41n, 18n), mc_s3())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(6n, 4n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(5n, 5n, 384n, 960n, 41n, 18n), mc_s4())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(5n, 5n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(4n, 6n, 384n, 960n, 41n, 18n), mc_s5())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(4n, 6n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(3n, 7n, 384n, 960n, 41n, 18n), mc_s6())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(3n, 7n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(2n, 8n, 384n, 960n, 41n, 18n), mc_s7())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(2n, 8n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(1n, 9n, 384n, 960n, 41n, 18n), mc_s8())
+    : {_ == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib.go(1n, 9n, 384n, 960n, 41n, 18n),
+      Part.max_contrib.go(0n, 10n, 384n, 960n, 41n, 18n), mc_s9())
+    : {_ == 18n : Nat}
+  {==}
+
+# max_contrib's definition, generic so that the checker never evaluates a closed instance.
+def mc_unfold(+Gr: Nat, +KT: Nat, +T: Nat, +G: Nat)
+  -> {Part.max_contrib(Gr, KT, T, G) == Part.max_contrib.go(Gr, 0n, KT, T, G, 1n) : Nat}:
+  {==}
+
+def mc_served_full() -> {Part.max_contrib(Part.groups(1n, Impl.hidden()), Impl.kt0(Impl.kin()), 960n, 41n) ==
+    18n : Nat}:
+  %Equal.sym(Nat, Impl.kt0(Impl.kin()), 384n, {==})
+    : {Part.max_contrib(Part.groups(1n, Impl.hidden()), _, 960n, 41n) == 18n : Nat}
+  %Equal.sym(Nat, Part.groups(1n, Impl.hidden()), 10n, {==})
+    : {Part.max_contrib(_, 384n, 960n, 41n) == 18n : Nat}
+  %Equal.sym(Nat, Part.max_contrib(10n, 384n, 960n, 41n), Part.max_contrib.go(10n, 0n, 384n, 960n, 41n, 1n),
+      mc_unfold(10n, 384n, 960n, 41n))
+    : {_ == 18n : Nat}
+  mc_served_go()
+
 # At G = 164 = 41 * 4, A = 6144, H = 5120: MC0 = max_contrib over NG0 groups of KT0 tiles with
 # T0 = 3840 = 960 * 4, evaluated at the scaled-down total 960 and grid 41. The served constants
-# are substituted into NG0 / KT0 only after the scaling, so the checker never normalizes the
-# unscaled max_contrib.
+# are substituted into NG0 / KT0 only after the scaling, and the owners are computed through
+# division identities (mc_served_go), so the checker never normalizes an unscaled max_contrib.
 def Laws.mc0_served(G, A, H, served_g, served_a, served_h):
   +sa = served_a
   +sh = served_h
@@ -1089,7 +1238,7 @@ def Laws.mc0_served(G, A, H, served_g, served_a, served_h):
     : {Part.max_contrib(Part.groups(1n, H), Impl.kt0(_), 960n, 41n) == 18n : Nat}
   %Equal.sym(Nat, H, Impl.hidden(), sh)
     : {Part.max_contrib(Part.groups(1n, _), Impl.kt0(Impl.kin()), 960n, 41n) == 18n : Nat}
-  {==}
+  mc_served_full()
 
 # ==== (4) sum-of-squares partials and norm cells ====
 

@@ -22,7 +22,8 @@ This is differential evidence on finite instances (dim 96 x 2 rows, dim 5120 x 1
 residual), not a proof of equivalence. `--mutate NAME` applies a deliberate kernel mutation that
 the check must reject.
 
-Usage: python3 bend/norm_fuse_diff.py [--mutate NAME] [PRISTINE_ENGINE_ROOT]
+Usage: python3 bend/norm_fuse_diff.py [--mutate NAME] PRISTINE_ENGINE_ROOT
+  PRISTINE_ENGINE_ROOT: OUT/stock of bend/engine_trees.py.
 """
 
 from __future__ import annotations
@@ -35,11 +36,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/NORM_FUSE_TABLE.bend"
-DEFAULT_PRISTINE = "/tmp/elpis-exl3-baseline-1/exllamav3/exllamav3"
-LOCK = ["flock", "-s", "/tmp/elpis-gpu.lock", "nice", "-n", "19"]
 PATCH = "7001-norm-residual-fuse.patch"
 PINNED = ("exllamav3_ext/norm.cu", "modules/transformer.py", "model/model.py", "model/model_ls.py")
 SHAPES = ((96, 2), (5120, 16))          # NORM_FUSE_TABLE.bend main
@@ -454,7 +456,9 @@ def main(argv: list[str]) -> None:
         if len(args) < 2 or args[1] not in MUTATIONS:
             fail(f"--mutate needs one of {sorted(MUTATIONS)}")
         mutate, args = args[1], args[2:]
-    pristine = Path(args[0] if args else DEFAULT_PRISTINE)
+    if len(args) != 1:
+        fail(__doc__)
+    pristine = Path(args[0])
     with tempfile.TemporaryDirectory(prefix="norm-fuse-diff-") as scratch:
         work = Path(scratch)
         pre_tree, post_tree = build_trees(pristine, work)
@@ -479,14 +483,15 @@ def main(argv: list[str]) -> None:
         src = work / "norm_fuse_harness.cpp"
         src.write_text(harness(pre, post))
         exe = work / "harness"
-        r = subprocess.run(LOCK + ["clang++", "-std=c++20", "-O1", "-pthread", "-w", str(src), "-o", str(exe)],
+        r = subprocess.run(source_link.locked(["clang++", "-std=c++20", "-O1", "-pthread", "-w", str(src), "-o", str(exe)]),
                            capture_output=True, text=True)
         if r.returncode:
             fail("harness compile failed:\n" + r.stderr[-4000:])
         c_table = subprocess.run([str(exe), "table"], capture_output=True, text=True, check=True).stdout
         own = subprocess.run([str(exe), "ownership"], capture_output=True, text=True)
         exe_b = work / "table_bin"
-        r = subprocess.run(LOCK + [BEND, str(REPO / TABLE), "-o", str(exe_b)], capture_output=True, text=True,
+        r = subprocess.run(source_link.locked([source_link.bend(), str(REPO / TABLE), "-o", str(exe_b)]),
+                           capture_output=True, text=True,
                            cwd=REPO)
         if r.returncode:
             fail("Bend table compile failed:\n" + r.stdout[-2000:] + r.stderr[-2000:])

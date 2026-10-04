@@ -63,6 +63,39 @@ def gf_all_get(~f: Nat -> Bool, +n: Nat, +t: Nat, h: {gf_all(~f, n) == True{} : 
       gf_pick_eq(~f, t, p, Nat.is_eq(t, p), {==}, tr, hh,
         r => gf_all_get(~f, p, t, Ar.ar_and_r(f(p), gf_all(~f, p), hh), r))
 
+# f holds on every a + i, i < n (the window [a, a + n)).
+def gf_rng(~f: Nat -> Bool, +a: Nat, +n: Nat) -> Bool:
+  match n:
+    case 0n:
+      True{}
+    case 1n+p:
+      Bool.and(f(Nat.add(p, a)), gf_rng(~f, a, p))
+
+# f on every i < a and on the window [a, a + b) gives f on every i < b + a. The checker's
+# evaluation cost grows steeply with the size of the domain and its elements, so a large
+# finite check is decided window by window (each window in its own def) and glued here.
+def gf_glue(~f: Nat -> Bool, +b: Nat, +a: Nat, r: {gf_rng(~f, a, b) == True{} : Bool},
+    h: {gf_all(~f, a) == True{} : Bool}) -> {gf_all(~f, Nat.add(b, a)) == True{} : Bool}:
+  match b:
+    case 0n:
+      h
+    case 1n+p:
+      +rr = r
+      +x = Ar.ar_and_l(f(Nat.add(p, a)), gf_rng(~f, a, p), rr)
+      +y = gf_glue(~f, p, a, Ar.ar_and_r(f(Nat.add(p, a)), gf_rng(~f, a, p), rr), h)
+      %Equal.sym(Bool, f(Nat.add(p, a)), True{}, x) :
+        {Bool.and(_, gf_all(~f, Nat.add(p, a))) == True{} : Bool}
+      %Equal.sym(Bool, gf_all(~f, Nat.add(p, a)), True{}, y) : {Bool.and(True{}, _) == True{} : Bool}
+      {==}
+
+# gf_glue at a literal size n == b + a: callers state the window sizes as literals, so the checker
+# compares the glued check with the next window's syntactically instead of re-evaluating it.
+def gf_glue_at(~f: Nat -> Bool, +b: Nat, +a: Nat, +n: Nat, eq: {Nat.add(b, a) == n : Nat},
+    r: {gf_rng(~f, a, b) == True{} : Bool}, h: {gf_all(~f, a) == True{} : Bool})
+  -> {gf_all(~f, n) == True{} : Bool}:
+  %eq : {gf_all(~f, _) == True{} : Bool}
+  gf_glue(~f, b, a, r, h)
+
 # ==== (1) thread maps ====
 
 def gf_ov(+t: Nat) -> Bool:
@@ -72,8 +105,102 @@ def gf_ov(+t: Nat) -> Bool:
 def gf_ov_w(x: Nat) -> Bool:
   gf_ov(x)
 
-def gf_ov_all() -> {gf_all(~gf_ov_w, 512n) == True{} : Bool}:
+# The 512-thread check, decided in 16 windows of 32 threads (one def each).
+def gf_ov_w1() -> {gf_rng(~gf_ov_w, 32n, 32n) == True{} : Bool}:
   {==}
+
+def gf_ov_w2() -> {gf_rng(~gf_ov_w, 64n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w3() -> {gf_rng(~gf_ov_w, 96n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w4() -> {gf_rng(~gf_ov_w, 128n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w5() -> {gf_rng(~gf_ov_w, 160n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w6() -> {gf_rng(~gf_ov_w, 192n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w7() -> {gf_rng(~gf_ov_w, 224n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w8() -> {gf_rng(~gf_ov_w, 256n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w9() -> {gf_rng(~gf_ov_w, 288n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w10() -> {gf_rng(~gf_ov_w, 320n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w11() -> {gf_rng(~gf_ov_w, 352n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w12() -> {gf_rng(~gf_ov_w, 384n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w13() -> {gf_rng(~gf_ov_w, 416n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w14() -> {gf_rng(~gf_ov_w, 448n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_w15() -> {gf_rng(~gf_ov_w, 480n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_c1() -> {gf_all(~gf_ov_w, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ov_c2() -> {gf_all(~gf_ov_w, 64n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 32n, 64n, {==}, gf_ov_w1(), gf_ov_c1())
+
+def gf_ov_c3() -> {gf_all(~gf_ov_w, 96n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 64n, 96n, {==}, gf_ov_w2(), gf_ov_c2())
+
+def gf_ov_c4() -> {gf_all(~gf_ov_w, 128n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 96n, 128n, {==}, gf_ov_w3(), gf_ov_c3())
+
+def gf_ov_c5() -> {gf_all(~gf_ov_w, 160n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 128n, 160n, {==}, gf_ov_w4(), gf_ov_c4())
+
+def gf_ov_c6() -> {gf_all(~gf_ov_w, 192n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 160n, 192n, {==}, gf_ov_w5(), gf_ov_c5())
+
+def gf_ov_c7() -> {gf_all(~gf_ov_w, 224n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 192n, 224n, {==}, gf_ov_w6(), gf_ov_c6())
+
+def gf_ov_c8() -> {gf_all(~gf_ov_w, 256n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 224n, 256n, {==}, gf_ov_w7(), gf_ov_c7())
+
+def gf_ov_c9() -> {gf_all(~gf_ov_w, 288n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 256n, 288n, {==}, gf_ov_w8(), gf_ov_c8())
+
+def gf_ov_c10() -> {gf_all(~gf_ov_w, 320n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 288n, 320n, {==}, gf_ov_w9(), gf_ov_c9())
+
+def gf_ov_c11() -> {gf_all(~gf_ov_w, 352n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 320n, 352n, {==}, gf_ov_w10(), gf_ov_c10())
+
+def gf_ov_c12() -> {gf_all(~gf_ov_w, 384n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 352n, 384n, {==}, gf_ov_w11(), gf_ov_c11())
+
+def gf_ov_c13() -> {gf_all(~gf_ov_w, 416n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 384n, 416n, {==}, gf_ov_w12(), gf_ov_c12())
+
+def gf_ov_c14() -> {gf_all(~gf_ov_w, 448n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 416n, 448n, {==}, gf_ov_w13(), gf_ov_c13())
+
+def gf_ov_c15() -> {gf_all(~gf_ov_w, 480n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 448n, 480n, {==}, gf_ov_w14(), gf_ov_c14())
+
+def gf_ov_c16() -> {gf_all(~gf_ov_w, 512n) == True{} : Bool}:
+  gf_glue_at(~gf_ov_w, 32n, 480n, 512n, {==}, gf_ov_w15(), gf_ov_c15())
+
+def gf_ov_all() -> {gf_all(~gf_ov_w, 512n) == True{} : Bool}:
+  gf_ov_c16()
 
 def Laws.own_verify_into(t, tr):
   gf_all_get(~gf_ov_w, 512n, t, gf_ov_all(), tr)
@@ -282,6 +409,41 @@ def gf_all2_get(~f2: Nat -> Nat -> Bool, +n: Nat, +t: Nat, h: {gf_all2(~f2, n) =
       gf_pick2(~f2, t, p, Nat.is_eq(t, p), {==}, tr, hh,
         r => gf_all2_get(~f2, p, t, Ar.ar_and_r(f2(Nat.div(p, 128n), Nat.mod(p, 128n)), gf_all2(~f2, p), hh), r))
 
+# The gf_all window machinery (gf_rng, gf_glue, gf_glue_at) for gf_all2.
+def gf_rng2(~f2: Nat -> Nat -> Bool, +a: Nat, +n: Nat) -> Bool:
+  match n:
+    case 0n:
+      True{}
+    case 1n+p:
+      Bool.and(f2(Nat.div(Nat.add(p, a), 128n), Nat.mod(Nat.add(p, a), 128n)), gf_rng2(~f2, a, p))
+
+def gf_glue2(~f2: Nat -> Nat -> Bool, +b: Nat, +a: Nat, r: {gf_rng2(~f2, a, b) == True{} : Bool},
+    h: {gf_all2(~f2, a) == True{} : Bool}) -> {gf_all2(~f2, Nat.add(b, a)) == True{} : Bool}:
+  match b:
+    case 0n:
+      h
+    case 1n+p:
+      +rr = r
+      +x = Ar.ar_and_l(f2(Nat.div(Nat.add(p, a), 128n), Nat.mod(Nat.add(p, a), 128n)), gf_rng2(~f2, a, p), rr)
+      +y = gf_glue2(~f2, p, a, Ar.ar_and_r(f2(Nat.div(Nat.add(p, a), 128n), Nat.mod(Nat.add(p, a), 128n)),
+        gf_rng2(~f2, a, p), rr), h)
+      %Equal.sym(Bool, f2(Nat.div(Nat.add(p, a), 128n), Nat.mod(Nat.add(p, a), 128n)), True{}, x) :
+        {Bool.and(_, gf_all2(~f2, Nat.add(p, a))) == True{} : Bool}
+      %Equal.sym(Bool, gf_all2(~f2, Nat.add(p, a)), True{}, y) : {Bool.and(True{}, _) == True{} : Bool}
+      {==}
+
+def gf_glue2_at(~f2: Nat -> Nat -> Bool, +b: Nat, +a: Nat, +n: Nat, eq: {Nat.add(b, a) == n : Nat},
+    r: {gf_rng2(~f2, a, b) == True{} : Bool}, h: {gf_all2(~f2, a) == True{} : Bool})
+  -> {gf_all2(~f2, n) == True{} : Bool}:
+  %eq : {gf_all2(~f2, _) == True{} : Bool}
+  gf_glue2(~f2, b, a, r, h)
+
+# The whole check at the size term the laws use (m, e.g. 4 * 128, is not normalized: -m).
+def gf_all2_lit(~f2: Nat -> Nat -> Bool, +n: Nat, -m: Nat, eq: {n == m : Nat},
+    h: {gf_all2(~f2, n) == True{} : Bool}) -> {gf_all2(~f2, m) == True{} : Bool}:
+  %eq : {gf_all2(~f2, _) == True{} : Bool}
+  h
+
 # j * w + i < R * w for j < R, i < w.
 def gf_row_lt(+j: Nat, +i: Nat, +R: Nat, +w: Nat, jr: {Nat.is_lt(j, R) == True{} : Bool},
     ir: {Nat.is_lt(i, w) == True{} : Bool})
@@ -313,8 +475,102 @@ def gf_ovo(+k: Nat, +v: Nat) -> Bool:
 def gf_ovo_w(x: Nat, y: Nat) -> Bool:
   gf_ovo(x, y)
 
-def gf_ovo_all() -> {gf_all2(~gf_ovo_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+# The 512-entry check of gf_ovo, decided in 16 windows of 32 (one def each).
+def gf_ovo_r1() -> {gf_rng2(~gf_ovo_w, 32n, 32n) == True{} : Bool}:
   {==}
+
+def gf_ovo_r2() -> {gf_rng2(~gf_ovo_w, 64n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r3() -> {gf_rng2(~gf_ovo_w, 96n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r4() -> {gf_rng2(~gf_ovo_w, 128n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r5() -> {gf_rng2(~gf_ovo_w, 160n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r6() -> {gf_rng2(~gf_ovo_w, 192n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r7() -> {gf_rng2(~gf_ovo_w, 224n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r8() -> {gf_rng2(~gf_ovo_w, 256n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r9() -> {gf_rng2(~gf_ovo_w, 288n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r10() -> {gf_rng2(~gf_ovo_w, 320n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r11() -> {gf_rng2(~gf_ovo_w, 352n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r12() -> {gf_rng2(~gf_ovo_w, 384n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r13() -> {gf_rng2(~gf_ovo_w, 416n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r14() -> {gf_rng2(~gf_ovo_w, 448n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_r15() -> {gf_rng2(~gf_ovo_w, 480n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_c1() -> {gf_all2(~gf_ovo_w, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ovo_c2() -> {gf_all2(~gf_ovo_w, 64n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 32n, 64n, {==}, gf_ovo_r1(), gf_ovo_c1())
+
+def gf_ovo_c3() -> {gf_all2(~gf_ovo_w, 96n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 64n, 96n, {==}, gf_ovo_r2(), gf_ovo_c2())
+
+def gf_ovo_c4() -> {gf_all2(~gf_ovo_w, 128n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 96n, 128n, {==}, gf_ovo_r3(), gf_ovo_c3())
+
+def gf_ovo_c5() -> {gf_all2(~gf_ovo_w, 160n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 128n, 160n, {==}, gf_ovo_r4(), gf_ovo_c4())
+
+def gf_ovo_c6() -> {gf_all2(~gf_ovo_w, 192n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 160n, 192n, {==}, gf_ovo_r5(), gf_ovo_c5())
+
+def gf_ovo_c7() -> {gf_all2(~gf_ovo_w, 224n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 192n, 224n, {==}, gf_ovo_r6(), gf_ovo_c6())
+
+def gf_ovo_c8() -> {gf_all2(~gf_ovo_w, 256n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 224n, 256n, {==}, gf_ovo_r7(), gf_ovo_c7())
+
+def gf_ovo_c9() -> {gf_all2(~gf_ovo_w, 288n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 256n, 288n, {==}, gf_ovo_r8(), gf_ovo_c8())
+
+def gf_ovo_c10() -> {gf_all2(~gf_ovo_w, 320n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 288n, 320n, {==}, gf_ovo_r9(), gf_ovo_c9())
+
+def gf_ovo_c11() -> {gf_all2(~gf_ovo_w, 352n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 320n, 352n, {==}, gf_ovo_r10(), gf_ovo_c10())
+
+def gf_ovo_c12() -> {gf_all2(~gf_ovo_w, 384n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 352n, 384n, {==}, gf_ovo_r11(), gf_ovo_c11())
+
+def gf_ovo_c13() -> {gf_all2(~gf_ovo_w, 416n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 384n, 416n, {==}, gf_ovo_r12(), gf_ovo_c12())
+
+def gf_ovo_c14() -> {gf_all2(~gf_ovo_w, 448n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 416n, 448n, {==}, gf_ovo_r13(), gf_ovo_c13())
+
+def gf_ovo_c15() -> {gf_all2(~gf_ovo_w, 480n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 448n, 480n, {==}, gf_ovo_r14(), gf_ovo_c14())
+
+def gf_ovo_c16() -> {gf_all2(~gf_ovo_w, 512n) == True{} : Bool}:
+  gf_glue2_at(~gf_ovo_w, 32n, 480n, 512n, {==}, gf_ovo_r15(), gf_ovo_c15())
+
+def gf_ovo_all() -> {gf_all2(~gf_ovo_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+  gf_all2_lit(~gf_ovo_w, 512n, Nat.mul(4n, 128n), {==}, gf_ovo_c16())
 
 def Laws.own_verify_onto(k, v, kr, vr):
   gf_all2_at(~gf_ovo_w, 4n, k, v, gf_ovo_all(), kr, vr)
@@ -327,8 +583,102 @@ def gf_ori(+b: Nat, +t: Nat) -> Bool:
 def gf_ori_w(x: Nat, y: Nat) -> Bool:
   gf_ori(x, y)
 
-def gf_ori_all() -> {gf_all2(~gf_ori_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+# The 512-entry check of gf_ori, decided in 16 windows of 32 (one def each).
+def gf_ori_r1() -> {gf_rng2(~gf_ori_w, 32n, 32n) == True{} : Bool}:
   {==}
+
+def gf_ori_r2() -> {gf_rng2(~gf_ori_w, 64n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r3() -> {gf_rng2(~gf_ori_w, 96n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r4() -> {gf_rng2(~gf_ori_w, 128n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r5() -> {gf_rng2(~gf_ori_w, 160n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r6() -> {gf_rng2(~gf_ori_w, 192n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r7() -> {gf_rng2(~gf_ori_w, 224n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r8() -> {gf_rng2(~gf_ori_w, 256n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r9() -> {gf_rng2(~gf_ori_w, 288n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r10() -> {gf_rng2(~gf_ori_w, 320n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r11() -> {gf_rng2(~gf_ori_w, 352n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r12() -> {gf_rng2(~gf_ori_w, 384n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r13() -> {gf_rng2(~gf_ori_w, 416n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r14() -> {gf_rng2(~gf_ori_w, 448n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_r15() -> {gf_rng2(~gf_ori_w, 480n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_c1() -> {gf_all2(~gf_ori_w, 32n) == True{} : Bool}:
+  {==}
+
+def gf_ori_c2() -> {gf_all2(~gf_ori_w, 64n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 32n, 64n, {==}, gf_ori_r1(), gf_ori_c1())
+
+def gf_ori_c3() -> {gf_all2(~gf_ori_w, 96n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 64n, 96n, {==}, gf_ori_r2(), gf_ori_c2())
+
+def gf_ori_c4() -> {gf_all2(~gf_ori_w, 128n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 96n, 128n, {==}, gf_ori_r3(), gf_ori_c3())
+
+def gf_ori_c5() -> {gf_all2(~gf_ori_w, 160n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 128n, 160n, {==}, gf_ori_r4(), gf_ori_c4())
+
+def gf_ori_c6() -> {gf_all2(~gf_ori_w, 192n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 160n, 192n, {==}, gf_ori_r5(), gf_ori_c5())
+
+def gf_ori_c7() -> {gf_all2(~gf_ori_w, 224n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 192n, 224n, {==}, gf_ori_r6(), gf_ori_c6())
+
+def gf_ori_c8() -> {gf_all2(~gf_ori_w, 256n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 224n, 256n, {==}, gf_ori_r7(), gf_ori_c7())
+
+def gf_ori_c9() -> {gf_all2(~gf_ori_w, 288n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 256n, 288n, {==}, gf_ori_r8(), gf_ori_c8())
+
+def gf_ori_c10() -> {gf_all2(~gf_ori_w, 320n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 288n, 320n, {==}, gf_ori_r9(), gf_ori_c9())
+
+def gf_ori_c11() -> {gf_all2(~gf_ori_w, 352n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 320n, 352n, {==}, gf_ori_r10(), gf_ori_c10())
+
+def gf_ori_c12() -> {gf_all2(~gf_ori_w, 384n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 352n, 384n, {==}, gf_ori_r11(), gf_ori_c11())
+
+def gf_ori_c13() -> {gf_all2(~gf_ori_w, 416n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 384n, 416n, {==}, gf_ori_r12(), gf_ori_c12())
+
+def gf_ori_c14() -> {gf_all2(~gf_ori_w, 448n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 416n, 448n, {==}, gf_ori_r13(), gf_ori_c13())
+
+def gf_ori_c15() -> {gf_all2(~gf_ori_w, 480n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 448n, 480n, {==}, gf_ori_r14(), gf_ori_c14())
+
+def gf_ori_c16() -> {gf_all2(~gf_ori_w, 512n) == True{} : Bool}:
+  gf_glue2_at(~gf_ori_w, 32n, 480n, 512n, {==}, gf_ori_r15(), gf_ori_c15())
+
+def gf_ori_all() -> {gf_all2(~gf_ori_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+  gf_all2_lit(~gf_ori_w, 512n, Nat.mul(4n, 128n), {==}, gf_ori_c16())
 
 def Laws.own_replay_into(b, t, br, tr):
   gf_all2_at(~gf_ori_w, 4n, b, t, gf_ori_all(), br, tr)
@@ -341,8 +691,102 @@ def gf_oro(+k: Nat, +v: Nat) -> Bool:
 def gf_oro_w(x: Nat, y: Nat) -> Bool:
   gf_oro(x, y)
 
-def gf_oro_all() -> {gf_all2(~gf_oro_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+# The 512-entry check of gf_oro, decided in 16 windows of 32 (one def each).
+def gf_oro_r1() -> {gf_rng2(~gf_oro_w, 32n, 32n) == True{} : Bool}:
   {==}
+
+def gf_oro_r2() -> {gf_rng2(~gf_oro_w, 64n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r3() -> {gf_rng2(~gf_oro_w, 96n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r4() -> {gf_rng2(~gf_oro_w, 128n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r5() -> {gf_rng2(~gf_oro_w, 160n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r6() -> {gf_rng2(~gf_oro_w, 192n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r7() -> {gf_rng2(~gf_oro_w, 224n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r8() -> {gf_rng2(~gf_oro_w, 256n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r9() -> {gf_rng2(~gf_oro_w, 288n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r10() -> {gf_rng2(~gf_oro_w, 320n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r11() -> {gf_rng2(~gf_oro_w, 352n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r12() -> {gf_rng2(~gf_oro_w, 384n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r13() -> {gf_rng2(~gf_oro_w, 416n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r14() -> {gf_rng2(~gf_oro_w, 448n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_r15() -> {gf_rng2(~gf_oro_w, 480n, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_c1() -> {gf_all2(~gf_oro_w, 32n) == True{} : Bool}:
+  {==}
+
+def gf_oro_c2() -> {gf_all2(~gf_oro_w, 64n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 32n, 64n, {==}, gf_oro_r1(), gf_oro_c1())
+
+def gf_oro_c3() -> {gf_all2(~gf_oro_w, 96n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 64n, 96n, {==}, gf_oro_r2(), gf_oro_c2())
+
+def gf_oro_c4() -> {gf_all2(~gf_oro_w, 128n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 96n, 128n, {==}, gf_oro_r3(), gf_oro_c3())
+
+def gf_oro_c5() -> {gf_all2(~gf_oro_w, 160n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 128n, 160n, {==}, gf_oro_r4(), gf_oro_c4())
+
+def gf_oro_c6() -> {gf_all2(~gf_oro_w, 192n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 160n, 192n, {==}, gf_oro_r5(), gf_oro_c5())
+
+def gf_oro_c7() -> {gf_all2(~gf_oro_w, 224n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 192n, 224n, {==}, gf_oro_r6(), gf_oro_c6())
+
+def gf_oro_c8() -> {gf_all2(~gf_oro_w, 256n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 224n, 256n, {==}, gf_oro_r7(), gf_oro_c7())
+
+def gf_oro_c9() -> {gf_all2(~gf_oro_w, 288n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 256n, 288n, {==}, gf_oro_r8(), gf_oro_c8())
+
+def gf_oro_c10() -> {gf_all2(~gf_oro_w, 320n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 288n, 320n, {==}, gf_oro_r9(), gf_oro_c9())
+
+def gf_oro_c11() -> {gf_all2(~gf_oro_w, 352n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 320n, 352n, {==}, gf_oro_r10(), gf_oro_c10())
+
+def gf_oro_c12() -> {gf_all2(~gf_oro_w, 384n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 352n, 384n, {==}, gf_oro_r11(), gf_oro_c11())
+
+def gf_oro_c13() -> {gf_all2(~gf_oro_w, 416n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 384n, 416n, {==}, gf_oro_r12(), gf_oro_c12())
+
+def gf_oro_c14() -> {gf_all2(~gf_oro_w, 448n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 416n, 448n, {==}, gf_oro_r13(), gf_oro_c13())
+
+def gf_oro_c15() -> {gf_all2(~gf_oro_w, 480n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 448n, 480n, {==}, gf_oro_r14(), gf_oro_c14())
+
+def gf_oro_c16() -> {gf_all2(~gf_oro_w, 512n) == True{} : Bool}:
+  gf_glue2_at(~gf_oro_w, 32n, 480n, 512n, {==}, gf_oro_r15(), gf_oro_c15())
+
+def gf_oro_all() -> {gf_all2(~gf_oro_w, Nat.mul(4n, 128n)) == True{} : Bool}:
+  gf_all2_lit(~gf_oro_w, 512n, Nat.mul(4n, 128n), {==}, gf_oro_c16())
 
 def Laws.own_replay_onto(k, v, kr, vr):
   gf_all2_at(~gf_oro_w, 4n, k, v, gf_oro_all(), kr, vr)

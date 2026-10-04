@@ -89,7 +89,7 @@ law combine_absolute:
   for ~merge: A -> A -> A
   for ~P: Nat -> Nat -> A
   for ~e: A
-  for ~rid: @x:A -> {merge(x, e) == x : A}
+  for rid: @x:A -> {merge(x, e) == x : A}
   for +c: Nat
   for +q_len: Nat
   for +r: Nat

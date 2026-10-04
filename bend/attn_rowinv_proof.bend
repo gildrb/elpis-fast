@@ -575,9 +575,37 @@ def rb_sub_succ_pred(+a: Nat, +k: Nat, +d: Nat, h: {Nat.sub(a, k) == 1n+d : Nat}
     case 1n+ap 1n+kp:
       rb_sub_succ_pred(ap, kp, d, h)
 
+# Past the row's last chunk (chunks - k == 0) every remaining split merges the identity, so the
+# combine over `left` splits leaves acc unchanged. h is the one instance merge(acc, e) == acc of
+# the right-identity hypothesis that this tail needs (acc does not change along it).
+def rb_tail(~A: Data, ~merge: A -> A -> A, ~P: Nat -> Nat -> A, ~e: A,
+    +left: Nat, +k: Nat, +c: Nat, +q: Nat, +r: Nat, +S: Nat, +B: Nat, +M: Nat, +acc: A,
+    +h: {merge(acc, e) == acc : A},
+    +hd: {Nat.sub(Spec.chunks(Nat.add(c, r), S, B, M), k) == 0n : Nat},
+    +fits: {Nat.is_le(q, Nat.mul(S, B)) == True{} : Bool}, +row: {Nat.is_lt(r, q) == True{} : Bool})
+  -> {Impl.combine.go(~A, ~merge, ~P, ~e, left, k, c, q, r, S, B, M, acc) == acc : A}:
+  match left:
+    case 0n:
+      {==}
+    case 1n+m:
+      +live = Spec.chunks(Nat.add(c, r), S, B, M)
+      +ILO = Impl.chunk_lo(c, q, r, k, S, B, M)
+      +IHI = Impl.chunk_hi(c, q, r, k, S, B, M)
+      +SLO = Spec.chunk_lo(Nat.add(c, r), k, S, B, M)
+      +SHI = Spec.chunk_hi(Nat.add(c, r), k, S, B, M)
+      %Equal.sym(A, Impl.partial(~A, ~P, ~e, Nat.is_lt(ILO, IHI), ILO, IHI), Impl.partial(~A, ~P, ~e, Nat.is_lt(k, live), SLO, SHI),
+        rb_kpart(~A, ~P, ~e, c, q, r, k, S, B, M, fits, row)) :
+        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, _)) == acc : A}
+      %Equal.sym(Bool, Nat.is_lt(k, live), False{}, rb_sub_zero_nlt(live, k, hd)) :
+        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, Impl.partial(~A, ~P, ~e, _, SLO, SHI))) == acc : A}
+      %Equal.sym(A, merge(acc, e), acc, h) :
+        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, _) == acc : A}
+      rb_tail(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, acc, h, rb_sub_zero_succ(live, k, hd), fits, row)
+
 # The combine over `left` splits from split k equals the reference fold over the d = chunks - k
-# remaining own chunks (d <= left); splits past the last chunk merge the identity.
-def rb_fold(~A: Data, ~merge: A -> A -> A, ~P: Nat -> Nat -> A, ~e: A, ~rid: @x:A -> {merge(x, e) == x : A},
+# remaining own chunks (d <= left); splits past the last chunk merge the identity. rid is used
+# once on every path (passed on, or instantiated at the final acc for rb_tail).
+def rb_fold(~A: Data, ~merge: A -> A -> A, ~P: Nat -> Nat -> A, ~e: A, rid: @x:A -> {merge(x, e) == x : A},
     +left: Nat, +k: Nat, +c: Nat, +q: Nat, +r: Nat, +S: Nat, +B: Nat, +M: Nat, +acc: A, +d: Nat,
     +hd: {Nat.sub(Spec.chunks(Nat.add(c, r), S, B, M), k) == d : Nat}, dle: {Nat.is_le(d, left) == True{} : Bool},
     +fits: {Nat.is_le(q, Nat.mul(S, B)) == True{} : Bool}, +row: {Nat.is_lt(r, q) == True{} : Bool})
@@ -590,20 +618,7 @@ def rb_fold(~A: Data, ~merge: A -> A -> A, ~P: Nat -> Nat -> A, ~e: A, ~rid: @x:
       Empty.absurd({Impl.combine.go(~A, ~merge, ~P, ~e, 0n, k, c, q, r, S, B, M, acc) ==
         Spec.fold.go(~A, ~merge, ~P, 1n+dp, k, Nat.add(c, r), S, B, M, acc) : A}, Ar.ar_false_true(dle))
     case 1n+m 0n:
-      +live = Spec.chunks(Nat.add(c, r), S, B, M)
-      +ILO = Impl.chunk_lo(c, q, r, k, S, B, M)
-      +IHI = Impl.chunk_hi(c, q, r, k, S, B, M)
-      +SLO = Spec.chunk_lo(Nat.add(c, r), k, S, B, M)
-      +SHI = Spec.chunk_hi(Nat.add(c, r), k, S, B, M)
-      %Equal.sym(A, Impl.partial(~A, ~P, ~e, Nat.is_lt(ILO, IHI), ILO, IHI), Impl.partial(~A, ~P, ~e, Nat.is_lt(k, live), SLO, SHI),
-        rb_kpart(~A, ~P, ~e, c, q, r, k, S, B, M, fits, row)) :
-        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, _)) == acc : A}
-      %Equal.sym(Bool, Nat.is_lt(k, live), False{}, rb_sub_zero_nlt(live, k, hd)) :
-        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, Impl.partial(~A, ~P, ~e, _, SLO, SHI))) == acc : A}
-      %Equal.sym(A, merge(acc, e), acc, rid(acc)) :
-        {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, _) == acc : A}
-      rb_fold(~A, ~merge, ~P, ~e, ~rid, m, 1n+k, c, q, r, S, B, M, acc, 0n, rb_sub_zero_succ(live, k, hd),
-        Ar.ar_h_le_zero(m), fits, row)
+      rb_tail(~A, ~merge, ~P, ~e, 1n+m, k, c, q, r, S, B, M, acc, rid(acc), hd, fits, row)
     case 1n+m 1n+dp:
       +live = Spec.chunks(Nat.add(c, r), S, B, M)
       +ILO = Impl.chunk_lo(c, q, r, k, S, B, M)
@@ -616,7 +631,7 @@ def rb_fold(~A: Data, ~merge: A -> A -> A, ~P: Nat -> Nat -> A, ~e: A, ~rid: @x:
         {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, _)) == RHS : A}
       %Equal.sym(Bool, Nat.is_lt(k, live), True{}, rb_sub_succ_lt(live, k, dp, hd)) :
         {Impl.combine.go(~A, ~merge, ~P, ~e, m, 1n+k, c, q, r, S, B, M, merge(acc, Impl.partial(~A, ~P, ~e, _, SLO, SHI))) == RHS : A}
-      rb_fold(~A, ~merge, ~P, ~e, ~rid, m, 1n+k, c, q, r, S, B, M, merge(acc, P(SLO, SHI)), dp,
+      rb_fold(~A, ~merge, ~P, ~e, rid, m, 1n+k, c, q, r, S, B, M, merge(acc, P(SLO, SHI)), dp,
         rb_sub_succ_pred(live, k, dp, hd), dle, fits, row)
 
 def Laws.combine_absolute(A, merge, P, e, rid, c, q_len, r, splits, block_n, min_split, fits_, row_):
@@ -632,7 +647,7 @@ def Laws.combine_absolute(A, merge, P, e, rid, c, q_len, r, splits, block_n, min
     Equal.cong(Nat, Bool, x => Nat.is_le(Spec.ceil_div(1n+p, x), splits), si, sl,
       rb_spec_eq(1n+p, splits, block_n, min_split, rb_pos_l(splits, block_n, tpos), bp)),
     rb_cover(1n+p, splits, block_n, min_split, {==}, tpos, bp))
-  rb_fold(~A, ~merge, ~P, ~e, ~rid, splits, 0n, c, q_len, r, splits, block_n, min_split, e, live,
+  rb_fold(~A, ~merge, ~P, ~e, rid, splits, 0n, c, q_len, r, splits, block_n, min_split, e, live,
     Ar.ar_sub_zero_r(live), cov, fits, row)
 
 # ---------------------------------------------------------------- B7: every key exactly once

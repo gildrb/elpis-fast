@@ -4,7 +4,7 @@
   nix develop --offline --no-write-lock-file -c \\
     python3 bend/exl3_build.py --output build/bend-exl3
 
-Uses the flake-pinned bend 2.0.34 and clang 19.1.7 from the dev shell PATH.
+Uses the flake-pinned bend 2.0.35 and clang 19.1.7 from the dev shell PATH.
 The root holds two artifacts: the chain acceptor (bend/EXL3_ACCEPT.bend,
 libexl3_accept.so, identity.json) and the tree acceptor
 (bend/EXL3_TREE_ACCEPT.bend, libexl3_tree_accept.so, tree_identity.json).
@@ -34,10 +34,10 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BEND_VERSION = "bend 2.0.34\n"
+BEND_VERSION = "bend 2.0.35\n"
 CLANG_VERSION = "clang version 19.1.7"
 PROOFS = ("bend/exl3_accept_proof.bend", "bend/exl3_tree_accept_gate.bend")
-# bend 2.0.34 bend2/main.ts cli_verdict: PASS plus the --verdict hint, on stdout. It prints
+# bend 2.0.35 bend2/main.ts cli_verdict: PASS plus the --verdict hint, on stdout. It prints
 # PASS only when every def checks and none relies on @unsafe or foreign code, imports included.
 VERDICT = "ALL PROOFS CHECK\nUse --verdict for mathematical validity.\n"
 SOURCES = (
@@ -395,7 +395,7 @@ def main(arguments: list[str]) -> int:
     clang = resolve("clang")
     bend_environment = {**os.environ, "BEND_NO_TELEMETRY": "1"}
     if run([str(bend), "version"], REPO, bend_environment) != BEND_VERSION:
-        raise fail("requires exactly bend 2.0.34")
+        raise fail("requires exactly bend 2.0.35")
     clang_version = run([str(clang), "--version"], REPO, compile_environment(clang, {}))
     if not clang_version.startswith(CLANG_VERSION + "\n"):
         raise fail("requires exactly clang 19.1.7")

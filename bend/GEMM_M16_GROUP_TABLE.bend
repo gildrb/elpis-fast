@@ -361,7 +361,15 @@ def run(xs: Maybe<&2, List<&2, Nat>>) -> IO(Unit):
     case _:
       IO.die(Unit, 2, "usage: GEMM_M16_GROUP_TABLE m k G n0 [n1 [n2 [n3]]] (naturals)")
 
+# IO.args() lists the program path first (Bend 2.0.34 and 2.0.35 both do).
+def args.after_program(xs: List<String>) -> List<String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case _ <> rest:
+      rest
+
 def main() -> IO(Unit):
   do IO<Unit>:
     xs : List<String> <- IO.args()
-    run(nats(xs))
+    run(nats(args.after_program(xs)))

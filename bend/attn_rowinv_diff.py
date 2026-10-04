@@ -14,6 +14,8 @@ the row, that store_acc holds on every split with a non-empty chunk, and that ev
 position p has the same chunk list in every (c, r) with c + r = p.
 
 usage: attn_rowinv_diff.py SHIPPED_TRITON_PAGED_PY [--bend-output FILE] [--mutate NAME]
+  SHIPPED_TRITON_PAGED_PY: modules/attention_fn/triton_paged.py of OUT/patched of
+                      bend/engine_trees.py --through 3005-attn-row-invariant-split.patch
   --bend-output FILE  compare with a saved `bend bend/ATTN_ROWINV_TABLE.bend` stdout instead of
                       running bend
   --mutate round_len  row split sized from the round length (_gqa_row_split(qa0, ->
@@ -35,8 +37,11 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-BEND = "/nix/store/kqhwjzdm96d14fvzblb4jz9m73cr3i0j-bend-2.0.34/bin/bend"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import source_link  # noqa: E402
+
+REPO = source_link.REPO
 TABLE = "bend/ATTN_ROWINV_TABLE.bend"
 # pristine engine + committed ext series (through 3005)
 TRITON_PAGED_SHA256 = "12896d430c94639ec4157a967f1635cc4a0dcc2198294d6349a9a2749ed9623e"
@@ -238,14 +243,15 @@ def bend_table(saved: str | None) -> str:
     # 65,544 rows, the compiled program about a minute
     with tempfile.TemporaryDirectory() as d:
         exe = Path(d) / "table"
-        p = subprocess.run([BEND, TABLE, "-o", str(exe)], cwd=REPO, capture_output=True, text=True)
-        check(p.returncode == 0, f"{BEND} {TABLE} -o exited {p.returncode}: {p.stderr.strip()}")
+        bend = source_link.bend()
+        p = subprocess.run(source_link.locked([bend, TABLE, "-o", str(exe)]), cwd=REPO, capture_output=True, text=True)
+        check(p.returncode == 0, f"{bend} {TABLE} -o exited {p.returncode}: {p.stderr.strip()}")
 
         def unlimited() -> None:
             # The Bend runtime reserves its heap up front: lift an address-space cap (ulimit -v)
             resource.setrlimit(resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
 
-        p = subprocess.run([str(exe), "--gpu", "off"], capture_output=True, text=True, timeout=3600,
+        p = subprocess.run(source_link.locked([str(exe), "--gpu", "off"]), capture_output=True, text=True, timeout=3600,
                            preexec_fn=unlimited)
     check(p.returncode == 0, f"compiled {TABLE} exited {p.returncode}: {p.stderr.strip()}")
     return p.stdout
