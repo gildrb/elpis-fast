@@ -22,8 +22,8 @@ fi
   --representation exl3
 
 echo "UNQUALIFIED EXL3 + native DFlash2: native context262144/cache270336/CQ3; no capacity, quality or performance claim." >&2
-# Persistent prefix cache: only the live deployment mounts /prefix-cache (the server checks owner and mode 0700;
-# QWEN_PREFIX_PERSIST=0 turns it off).
+# Persistent prefix cache: Compose always mounts /prefix-cache; research, candidate and lane containers
+# must not (the server checks owner and mode 0700; QWEN_PREFIX_PERSIST=0 turns it off).
 prefix=()
 if [[ -d /prefix-cache ]]; then
   prefix=(--prefix-cache /prefix-cache)

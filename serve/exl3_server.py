@@ -6,29 +6,37 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import io
 import json
 import math
 import os
 import queue
 import re
+import select
 import signal
 import stat
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar, override
 
+import regex
 from jinja2 import TemplateError
-from jsonschema import Draft202012Validator, FormatChecker
-from jsonschema.exceptions import SchemaError
+from jsonschema import Draft202012Validator, FormatChecker, validators
+from jsonschema.exceptions import SchemaError, ValidationError
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
 if TYPE_CHECKING:
+    import socket
+    from collections.abc import Buffer, Iterator
+
     import torch
     from exllamav3.generator.persist import PrefixStore
     from jsonschema.protocols import Validator
@@ -75,7 +83,16 @@ SCHEMA_SINGLE = {
 SCHEMA_ARRAYS = {"allOf", "anyOf", "oneOf", "prefixItems"}
 # Keywords applying subschemas to the whole tool-argument object, and the keywords
 # by which a subschema would declare a parameter's value schema.
-ROOT_COMPOSITION = {"allOf", "anyOf", "oneOf", "if", "then", "else", "dependentSchemas"}
+ROOT_COMPOSITION = {
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "not",
+    "if",
+    "then",
+    "else",
+    "dependentSchemas",
+}
 PARAMETER_SCHEMAS = {
     "$ref",
     "$dynamicRef",
@@ -85,6 +102,14 @@ PARAMETER_SCHEMAS = {
     "unevaluatedProperties",
 }
 FORMAT_CHECKER = FormatChecker()
+# Total time for client-schema regex matches while one model response is checked.
+# Python's backtracking `re` has no time bound; `regex` stops at the deadline.
+PATTERN_SECONDS = 2.0
+PATTERN_DEADLINE: ContextVar[float] = ContextVar("pattern_deadline")
+# Client read limits: request line and headers (this includes keep-alive idle time),
+# then the whole body. Generation and response writes have no socket timeout.
+HEADER_SECONDS = 60
+BODY_SECONDS = 300
 # Persistent prefix cache (engine generator/persist.py). Saved on SIGTERM and after 30 s idle, at most every 5 min.
 PERSIST_ENV = "QWEN_PREFIX_PERSIST"
 PERSIST_IDLE_SECONDS = 30
@@ -256,7 +281,10 @@ def check_schema_nodes(schema: JSON, root: dict[str, JSON]) -> None:
     if isinstance(schema, bool):
         return
     node = object_value(schema, "JSON Schema")
-    allowed = set(Draft202012Validator.VALIDATORS) | SCHEMA_ANNOTATIONS
+    # jsonschema checks then/else inside its "if" validator, not as VALIDATORS keys.
+    allowed = (
+        set(Draft202012Validator.VALIDATORS) | SCHEMA_ANNOTATIONS | {"then", "else"}
+    )
     only_fields(node, allowed, "JSON Schema")
     if (
         "$schema" in node
@@ -341,6 +369,160 @@ def check_root_composition(node: dict[str, JSON]) -> None:
             check_root_composition(child)
 
 
+@contextmanager
+def pattern_budget() -> Iterator[None]:
+    """Allow PATTERN_SECONDS of client-schema regex matching in this context.
+
+    Yields:
+        Control while the deadline applies.
+    """
+    token = PATTERN_DEADLINE.set(time.monotonic() + PATTERN_SECONDS)
+    try:
+        yield
+    finally:
+        PATTERN_DEADLINE.reset(token)
+
+
+def pattern_search(pattern: str, text: str) -> bool:
+    """Search text with a client-schema regex inside the current pattern budget.
+
+    Returns:
+        Whether the pattern matches anywhere in the text.
+
+    Raises:
+        APIError: The budget is spent, or `regex` cannot compile the pattern.
+    """
+    timeout = APIError(
+        f"Tool schema patterns exceeded the {PATTERN_SECONDS:g} s evaluation budget",
+        400,
+        "pattern_timeout",
+    )
+    remaining = PATTERN_DEADLINE.get() - time.monotonic()
+    if remaining <= 0:
+        raise timeout
+    try:
+        # concurrent=True releases the GIL, so a long match does not stop generation.
+        match = regex.search(pattern, text, timeout=remaining, concurrent=True)
+    except TimeoutError as exc:
+        raise timeout from exc
+    except regex.error as exc:
+        raise APIError(
+            "Tool schema pattern cannot be evaluated", 400, "invalid_schema"
+        ) from exc
+    return match is not None
+
+
+# jsonschema 4.26 matches these keywords with `re`. These replacements use the
+# bounded search. unevaluatedProperties also matches patternProperties with `re`;
+# check_unevaluated_patterns does not admit that pair.
+def bounded_pattern(
+    _validator: Validator, pattern: str, instance: JSON, _schema: dict[str, JSON]
+) -> Iterator[ValidationError]:
+    """Apply `pattern` to strings with the bounded search.
+
+    Yields:
+        A validation error when the string does not match.
+    """
+    if isinstance(instance, str) and not pattern_search(pattern, instance):
+        yield ValidationError(f"{instance!r} does not match {pattern!r}")
+
+
+def bounded_pattern_properties(
+    validator: Validator,
+    patterns: dict[str, JSON],
+    instance: JSON,
+    _schema: dict[str, JSON],
+) -> Iterator[ValidationError]:
+    """Apply `patternProperties` subschemas to matching keys with the bounded search.
+
+    Yields:
+        Validation errors of the matching values.
+    """
+    if not isinstance(instance, dict):
+        return
+    for pattern, subschema in patterns.items():
+        for key, value in instance.items():
+            if pattern_search(pattern, key):
+                yield from validator.descend(
+                    value, subschema, path=key, schema_path=pattern
+                )
+
+
+def bounded_additional_properties(
+    validator: Validator,
+    additional: JSON,
+    instance: JSON,
+    schema: dict[str, JSON],
+) -> Iterator[ValidationError]:
+    """Apply `additionalProperties` to keys outside properties and patternProperties.
+
+    Yields:
+        Validation errors of the additional values, or one error if they are banned.
+    """
+    if not isinstance(instance, dict):
+        return
+    properties = object_value(schema.get("properties", {}), "properties")
+    patterns = object_value(schema.get("patternProperties", {}), "patternProperties")
+    extras = [
+        key
+        for key in instance
+        if key not in properties
+        and not any(pattern_search(pattern, key) for pattern in patterns)
+    ]
+    if isinstance(additional, dict):
+        for key in extras:
+            yield from validator.descend(instance[key], additional, path=key)
+    elif additional is False and extras:
+        yield ValidationError(f"Additional properties are not allowed: {extras!r}")
+
+
+SchemaValidator = validators.extend(
+    Draft202012Validator,
+    {
+        "pattern": bounded_pattern,
+        "patternProperties": bounded_pattern_properties,
+        "additionalProperties": bounded_additional_properties,
+    },
+)
+
+
+def contains_key(value: JSON, key: str) -> bool:
+    """Check if any object in a JSON tree, annotation values included, has a key.
+
+    Returns:
+        Whether the key occurs at any depth.
+    """
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if key in item:
+                return True
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return False
+
+
+def check_unevaluated_patterns(schema: dict[str, JSON]) -> None:
+    """Reject unevaluatedProperties with patternProperties in one tool schema.
+
+    jsonschema matches patternProperties for unevaluatedProperties with `re`, which
+    has no time bound. References resolve only into this object or the fixed draft
+    metaschemas, so a scan of all keys, annotation values included, finds every
+    client schema that validation can reach.
+
+    Raises:
+        APIError: The schema contains both keywords.
+    """
+    if contains_key(schema, "unevaluatedProperties") and contains_key(
+        schema, "patternProperties"
+    ):
+        raise APIError(
+            "unevaluatedProperties cannot be combined with patternProperties"
+        )
+
+
 @dataclass
 class Tool:
     """A declared function and the validator governing its returned arguments."""
@@ -368,7 +550,7 @@ class Tool:
         if name in properties:
             schemas.append(properties[name])
         for pattern, schema in patterns.items():
-            if re.search(pattern, name):
+            if pattern_search(pattern, name):
                 schemas.append(schema)
         if not schemas:
             schemas.append(self.schema.get("additionalProperties", True))
@@ -446,6 +628,7 @@ def parse_tools(value: JSON) -> dict[str, Tool]:
             raise APIError(
                 "Tool parameters root $ref is unsupported; inline the object"
             )
+        check_unevaluated_patterns(schema)
         try:
             Draft202012Validator.check_schema(schema)
             check_schema_nodes(schema, schema)
@@ -453,7 +636,7 @@ def parse_tools(value: JSON) -> dict[str, Tool]:
             registry = Registry().with_resource(
                 "urn:exl3:parameters", DRAFT202012.create_resource(schema)
             )
-            validator = Draft202012Validator(
+            validator = SchemaValidator(
                 schema, registry=registry, format_checker=FORMAT_CHECKER
             )
         except (SchemaError, re.error, RecursionError) as exc:
@@ -1607,12 +1790,62 @@ CHAT_FIELDS = COMMON_FIELDS | {
 }
 
 
+class DeadlineReader(io.RawIOBase):
+    """Read a blocking client socket only until the current read deadline.
+
+    The wait uses poll(), so the socket stays blocking and writes have no timeout.
+    """
+
+    def __init__(self, sock: socket.socket) -> None:
+        """Start with an expired deadline, so reads fail until the handler sets one."""
+        super().__init__()
+        self.sock = sock
+        self.poller = select.poll()
+        self.poller.register(sock, select.POLLIN)
+        self.deadline = 0.0
+
+    @override
+    def readable(self) -> bool:
+        return True
+
+    @override
+    def readinto(self, buffer: Buffer) -> int:
+        """Receive available bytes, or fail when none arrive before the deadline.
+
+        Returns:
+            The number of bytes received; 0 at end of stream.
+
+        Raises:
+            TimeoutError: The deadline passed before data arrived.
+        """
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0 or not self.poller.poll(math.ceil(remaining * 1000)):
+            message = "Request read deadline passed"
+            raise TimeoutError(message)
+        return self.sock.recv_into(buffer)
+
+
 class Handler(BaseHTTPRequestHandler):
     """Expose authenticated OpenAI endpoints without executing arbitrary tools."""
 
     protocol_version = "HTTP/1.1"
     engine: ClassVar[Server]
     authorization: ClassVar[str]
+    reader: DeadlineReader
+
+    @override
+    def setup(self) -> None:
+        super().setup()
+        # Close the stock reader so its socket reference does not keep the socket open.
+        self.rfile.close()
+        self.reader = DeadlineReader(self.connection)
+        self.rfile = io.BufferedReader(self.reader)
+
+    @override
+    def handle_one_request(self) -> None:
+        # The request line and headers, including keep-alive idle time.
+        self.reader.deadline = time.monotonic() + HEADER_SECONDS
+        super().handle_one_request()
 
     @override
     def log_message(self, format: str, *args: object) -> None:
@@ -1722,10 +1955,18 @@ class Handler(BaseHTTPRequestHandler):
         """
         try:
             size = self.body_length()
+            self.reader.deadline = time.monotonic() + BODY_SECONDS
             raw = self.rfile.read(size)
             if len(raw) != size:
                 raise APIError("Incomplete request body")
             return object_value(load_json(raw.decode("utf-8")), "Request body")
+        except TimeoutError as exc:
+            self.close_connection = True
+            raise APIError(
+                f"Request body did not arrive within {BODY_SECONDS} seconds",
+                408,
+                "request_timeout",
+            ) from exc
         except (UnicodeError, ValueError, RecursionError) as exc:
             self.close_connection = True
             raise APIError(
@@ -1823,7 +2064,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         result = self.engine.submit(ids, options)
         reasoning, content = split_reasoning(result.text, chat.thinking)
-        content, calls = parse_tool_output(content, chat, result.finish_reason)
+        with pattern_budget():
+            content, calls = parse_tool_output(content, chat, result.finish_reason)
         finish = "tool_calls" if calls else result.finish_reason
         message: dict[str, JSON] = {
             "role": "assistant",

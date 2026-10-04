@@ -69,6 +69,10 @@ def _probe_endpoints(port: int, key: str, model: str, budget: float) -> str | No
         try:
             connection.request("GET", path, headers={"Authorization": "Bearer " + key})
             response = connection.getresponse()
+            if path == "/health":
+                # Closing with unread bytes sends a TCP reset, which the server logs
+                # as a ConnectionResetError traceback on every probe.
+                response.read(MAX_BODY_BYTES + 1)
             if response.status != HTTP_OK:
                 return f"{path}: HTTP {response.status}"
             if path == "/v1/models":
@@ -117,11 +121,13 @@ def main() -> int:
     """
     logger = logging.getLogger(__name__)
     with Path("/app/api_key.txt").open("rb") as credential:
-        raw_key = credential.read(MAX_KEY_BYTES + 1)
-    if len(raw_key) > MAX_KEY_BYTES:
+        raw_key = credential.read(MAX_KEY_BYTES + 2)
+    # Same bound as the server: at most MAX_KEY_BYTES before one trailing newline.
+    key_bytes = raw_key.removesuffix(b"\n")
+    if len(key_bytes) > MAX_KEY_BYTES:
         message = "credential is too large"
         raise ValueError(message)
-    key = raw_key.removesuffix(b"\n").decode("ascii")
+    key = key_bytes.decode("ascii")
     if len(key) == 0 or not all(
         MIN_KEY_CHARACTER <= ord(char) <= MAX_KEY_CHARACTER for char in key
     ):
