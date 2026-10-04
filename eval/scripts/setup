@@ -63,14 +63,34 @@ if [[ "$mode" == --check ]]; then
 else
     uv sync --locked --python python3.12 --no-managed-python
 fi
-uv run --locked --no-sync --python python3.12 --no-managed-python python -c 'import hashlib
+uv run --locked --no-sync --python python3.12 --no-managed-python python -c 'import email
+import hashlib
+import os
 import sys
+import tempfile
+import tomllib
 from importlib.metadata import version
 from pathlib import Path
 
+import hatchling.build
 from verifiers.v1.harnesses.utils.launch import CHAT_PROGRAM_SOURCE
 
 root = Path.cwd()
+# uv locks the static dependency-metadata and does not compare it with the build.
+config = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["uv"]
+for entry in config["dependency-metadata"]:
+    source = root / config["sources"][entry["name"]]["path"]
+    build = tomllib.loads((source / "pyproject.toml").read_text())["build-system"]
+    if build["build-backend"] != "hatchling.build":
+        raise SystemExit("Static metadata check supports only hatchling sources")
+    with tempfile.TemporaryDirectory() as directory:
+        os.chdir(source)
+        info = hatchling.build.prepare_metadata_for_build_editable(directory)
+        os.chdir(root)
+        built = email.message_from_bytes((Path(directory) / info / "METADATA").read_bytes())
+    expected = (entry["version"], entry["requires-python"], entry["requires-dist"])
+    if (built["Version"], built["Requires-Python"], built.get_all("Requires-Dist", [])) != expected:
+        raise SystemExit("Static dependency-metadata differs from the built metadata: " + entry["name"])
 if version("verifiers") != sys.argv[1]:
     raise SystemExit("Installed Verifiers version differs from the source lock")
 programs = (

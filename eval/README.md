@@ -57,7 +57,7 @@ is part of its standard harness, not a repository-specific adapter.
 | Verifiers | `prime-envs.lock`: `https://github.com/PrimeIntellect-ai/verifiers`, `ef47b2e96284a00bdcfc1012b9624b0c41ee6a0e`, version `0.3.2.dev86` |
 | Environment packages | Editable packages from that exact Prime Envs checkout; versions in `pyproject.toml` and `uv.lock` |
 | Python/tools | Repository `flake.lock`; Python 3.12 for eval, uv 0.12.1; Python 3.13 remains the repository development interpreter |
-| Python dependencies | `eval/uv.lock`; separate native uv script locks in `runtime/` for the actual harness/scoring subprocesses |
+| Python dependencies | `eval/uv.lock`, including the build tools (`build` group); separate native uv script locks in `runtime/` for the actual harness/scoring subprocesses |
 | Task data | `datasets.lock`: HF commit, exact source files and hashes; MRCR GCS generation, size and SHA256 |
 | Sandbox | Digest-pinned base and uv images in `runtime/Dockerfile`; helper-image pins in `runtime/images.lock`; actual built image ID saved in each resolved Docker launch |
 
@@ -69,6 +69,10 @@ into Git. Existing wrong-revision or dirty checkouts fail instead of being reset
 The separate eval project is intentional: upstream's root uv lock does **not**
 include Verifiers or these environment packages. We lock their actual combined
 installation instead of relying on editable `pip install` resolution at run time.
+The editables build without isolation from the hash-locked `build` dependency
+group, so uv never fetches an unlocked build requirement. Verifiers' dynamic
+version comes from static `dependency-metadata`; `scripts/setup` fails if
+hatchling builds different metadata.
 
 The chosen Verifiers commit includes upstream's fix to reuse an installed uv.
 The earlier 0.3.1 release upgraded uv during each harness setup. Native runtime
@@ -135,13 +139,14 @@ optional long-context data. `run` never downloads missing task data.
 | `smoke` | First 3 AIME24 tasks; no shuffle | 1 | Prove loading → local inference → upstream scoring → saved traces |
 | `quick` | Native fixed-seed shuffle: 10 each AIME24/25/26, 24 I3 Logic, 12 LiveCodeBench | 1 | 66 fixed comparison tasks; not a broad intelligence score |
 | `full` | All tasks after each upstream environment's configured filters | 20 for each AIME; 1 I3 Logic; 2 LiveCodeBench | Per-environment estimates with representative rollout counts |
-| `tiny` + `broad` | Native fixed-seed shuffle: 3 AIME25 (32768 budget); 20 MMLU-Pro (8192), 6 I3 Logic (16384), 3 LiveCodeBench (16384) | 1 | The `bash autoresearch.sh` lane tasksets ([../docs/benchmarks.md](../docs/benchmarks.md)); sampled, not qualification |
+| `tiny` + `broad` | Native fixed-seed shuffle: 3 AIME25 (32768 budget); 10 MMLU-Pro (8192), 4 I3 Logic (16384), 3 LiveCodeBench (16384) | 1 | The broad autoresearch suite tasksets (`python -m bench.autoresearch --suite broad`; [../docs/benchmarks.md](../docs/benchmarks.md)); sampled, not qualification |
 
 Verifiers owns task shuffling (seed 0 at this revision). There is no local sampler
 or selection state. Quick comparisons reuse exactly the same datasets, order,
-configs, sampling and budgets. With C1 and an 8192-token cap, budget roughly an
-hour for quick at the measured short-request speed, plus startup/scoring overhead;
-actual time depends on the model. Full is deliberately expensive: AIME alone is
+configs, sampling and budgets. The roughly one-hour quick estimate was measured
+with C1 and the earlier 8192-token cap; the current 32768-token cap admits longer
+episodes, so budget more, plus startup/scoring overhead; actual time depends on
+the model. Full is deliberately expensive: AIME alone is
 1800 rollouts. Run one environment at a time when practical.
 
 Upstream recommends usually **more than 500 total rollouts** for full runs, not a
@@ -154,8 +159,10 @@ sampling; they do not create new independent questions.
 
 `configs/local.toml` defines the model `qwen3.8-27b`, endpoint
 `http://127.0.0.1:18020/v1`, client type `eval`, `api_key_var = "QWEN_API_KEY"`,
-temperature 0.6, top-p 0.95, top-k 20, min-p 0, no frequency/presence penalties,
-repetition penalty 1, thinking enabled, and at most 8192 output tokens per call.
+greedy decoding (temperature 0, top-p 1, no top-k), min-p 0, no frequency/presence
+penalties, repetition penalty 1, thinking enabled, and at most 32768 output tokens
+per call; a profile may lower only `sampling.max_tokens` (`broad` 8192/16384,
+`diverse` 8192).
 C1 and one server worker avoid oversubscribing the 3090. Core harness `null` has
 one model turn and no model tools. All profiles use the same locked Docker
 runtime. Current AIME tasks require a network policy that the host subprocess
@@ -192,7 +199,7 @@ Agentic full loads each complete configured bucket/taskset: MRCR has 8 rollouts
 per task (85 × 8 = 680 in the smaller bucket; 141 × 8 = 1128 in the larger);
 GraphWalks has 1150 tasks × 1. Both use the upstream bash harness, local Docker,
 16 model turns, at most 32768 output tokens across the episode, and the same
-8192-token per-call cap. No paid search, remote Prime sandbox, or LLM judge is
+32768-token per-call cap. No paid search, remote Prime sandbox, or LLM judge is
 configured. Untrusted model code never runs in the host subprocess runtime.
 
 **These are not direct model-window tests.** At the pinned Prime Envs revision,
@@ -228,7 +235,8 @@ The repository records its checkout commit, dirty status and diff hash, the EXL3
 model manifest (`prepare/exl3-manifest.json`), source lock, dataset lock,
 dependency locks and launch configs. Before each taskset it records the serving
 container's ID, image ID, running state, start time and restart count
-(`QWEN_SERVING_CONTAINER`) plus SHA256 of the frozen evaluator inputs; a changed
+(`QWEN_SERVING_CONTAINER`, else the one running container publishing the
+`configs/local.toml` endpoint) plus SHA256 of the frozen evaluator inputs; a changed
 container or input after the run fails the invocation. That identifies the
 running container, not the checkout that built it. Set `QWEN_RECIPE_ID` for
 direct-lane runs and preserve deployment image and model-inventory evidence with

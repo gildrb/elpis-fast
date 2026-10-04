@@ -15,9 +15,15 @@ dependencies = [
     "graphwalks==0.1.0",
 ]
 
+# Build tools are locked dependencies with hashes. Builds use the project
+# environment, so uv never fetches unlocked build requirements.
+[dependency-groups]
+build = ["editables==0.6", "hatchling==1.32.0", "hatch-vcs==0.5.0", "setuptools-scm==9.2.2"]
+
 [tool.uv]
 package = false
-build-constraint-dependencies = ["hatchling==1.32.0", "hatch-vcs==0.5.0", "setuptools-scm==9.2.2"]
+default-groups = ["build"]
+no-build-isolation = true
 
 [tool.uv.sources]
 verifiers = { path = ".sources/verifiers", editable = true }
@@ -29,3 +35,43 @@ livecodebench = { path = ".sources/prime-envs/environments/code/livecodebench", 
 mmlu-pro = { path = ".sources/prime-envs/environments/knowledge/mmlu_pro", editable = true }
 mrcr-v2 = { path = ".sources/prime-envs/environments/long_context/mrcr_v2", editable = true }
 graphwalks = { path = ".sources/prime-envs/environments/long_context/graphwalks", editable = true }
+
+# verifiers has a dynamic (hatch-vcs) version. Static metadata lets uv lock and
+# check it before the build tools are installed. uv does not compare it with the
+# build, so eval/scripts/setup compares it with the metadata hatchling builds.
+[[tool.uv.dependency-metadata]]
+name = "verifiers"
+version = "0.3.2.dev86"
+requires-python = "<3.15,>=3.11"
+requires-dist = [
+    "aiohttp>=3.14.1",
+    "anthropic>=1.0.0",
+    "gepa>=0.0.6",
+    "h11>=0.16.0",
+    "httpx2>=2.12.0",
+    "httpx>=0.27.0",
+    "loguru>=0.7.0",
+    "math-verify>=0.8.0",
+    "mcp==2.0.0",
+    "msgpack>=1.1.2",
+    "numpy>=2.1.0",
+    "openai<3.0.0,>=2.54.0",
+    "prime-pydantic-config[toml]>=0.4.3",
+    "prime-runs>=0.1.2",
+    "prime-sandboxes>=0.2.39",
+    "prime-tunnel>=0.1.8",
+    "pydantic>=2.12.3",
+    "pyzmq>=27.1.0",
+    "renderers[multimodal]>=0.1.12.dev2",
+    "rich>=11.0.0",
+    "tenacity>=8.5.0",
+    "tomli-w>=1.0.0",
+    "typing-extensions>=4.12.2",
+    "uvicorn>=0.52.0",
+    "harbor==0.21.0; (python_full_version >= '3.12') and extra == 'harbor'",
+    "datasets<6.0.0,>=3.3.0; extra == 'lean'",
+    "modal>=1.5.4; extra == 'modal'",
+    "openenv>=0.4.1; extra == 'openenv'",
+    "nltk>=3.9.2; extra == 'ta'",
+    "textarena==0.7.4; extra == 'ta'",
+]

@@ -21,17 +21,46 @@ while IFS=$'\t' read -r directory repository revision; do
   if [[ ! -e "$checkout" ]]; then
     if [[ "$check" == true ]]; then echo "Run eval/direct/setup first." >&2; exit 1; fi
     git clone --filter=blob:none --no-checkout "$repository" "$checkout"
-    git -C "$checkout" checkout --detach "$revision"
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$checkout" checkout --detach "$revision"
   fi
   [[ "$(git -C "$checkout" rev-parse HEAD)" == "$revision" ]] || { echo "Wrong source revision: $directory" >&2; exit 1; }
   [[ -z "$(git -C "$checkout" status --porcelain --untracked-files=all)" ]] || { echo "Dirty upstream source: $directory" >&2; exit 1; }
 done < <(jq -r '.sources[] | [.directory, .repository, .revision] | @tsv' "$root/sources.lock")
+# uv locks the static dependency-metadata and does not compare it with the build.
+metadata_check='import email
+import os
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+import hatchling.build
+
+root = Path(sys.argv[1])
+config = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["uv"]
+for entry in config["dependency-metadata"]:
+    source = root / config["sources"][entry["name"]]["path"]
+    build = tomllib.loads((source / "pyproject.toml").read_text())["build-system"]
+    if build["build-backend"] != "hatchling.build":
+        raise SystemExit("Static metadata check supports only hatchling sources")
+    with tempfile.TemporaryDirectory() as directory:
+        os.chdir(source)
+        info = hatchling.build.prepare_metadata_for_build_editable(directory)
+        os.chdir(root)
+        built = email.message_from_bytes((Path(directory) / info / "METADATA").read_bytes())
+    expected = (entry["version"], entry["requires-python"], entry["requires-dist"])
+    if (built["Version"], built["Requires-Python"], built.get_all("Requires-Dist", [])) != expected:
+        raise SystemExit("Static dependency-metadata differs from the built metadata: " + entry["name"])
+'
+# uv 0.12.1 reports a dynamic-version lock as stale with --project from another
+# directory, so run uv in the project directory.
 for project in mrcr graphwalks; do
   if [[ "$check" == true ]]; then
     [[ -x "$root/$project/.venv/bin/vf-eval" ]] || { echo "Run eval/direct/setup first." >&2; exit 1; }
-    uv lock --project "$root/$project" --check --offline
+    uv lock --directory "$root/$project" --check --offline
     uv pip check --python "$root/$project/.venv/bin/python"
   else
-    uv sync --project "$root/$project" --locked
+    uv sync --directory "$root/$project" --locked --python python3.12 --no-managed-python
   fi
+  "$root/$project/.venv/bin/python" -c "$metadata_check" "$root/$project"
 done

@@ -26,7 +26,7 @@ if [[ "${QWEN_EVAL_BASE_URL+x}" == x ]]; then
   case "$QWEN_EVAL_BASE_URL" in
     http://127.0.0.1:18020/v1|http://127.0.0.1:18021/v1)
       transport_args=(--api-base-url "$QWEN_EVAL_BASE_URL") ;;
-    *) echo "QWEN_EVAL_BASE_URL must be the approved loopback18020 or18021 /v1 URL." >&2; exit 2 ;;
+    *) echo "QWEN_EVAL_BASE_URL must be the approved loopback 18020 or 18021 /v1 URL." >&2; exit 2 ;;
   esac
 fi
 "$root/setup" --check
@@ -37,7 +37,7 @@ if [[ "$dry" == false ]]; then
   : "${QWEN_API_KEY_FILE:?Set the absolute private serving key path}"
   [[ "$QWEN_API_KEY_FILE" == /* && -f "$QWEN_API_KEY_FILE" && ! -L "$QWEN_API_KEY_FILE" && -r "$QWEN_API_KEY_FILE" ]]
   [[ "$(stat --format='%u' "$QWEN_API_KEY_FILE")" -eq "$(id -u)" ]]
-  case "$(stat --format='%a' "$QWEN_API_KEY_FILE")" in 400|600) ;; *) echo "Key must have mode0400 or0600." >&2; exit 1 ;; esac
+  case "$(stat --format='%a' "$QWEN_API_KEY_FILE")" in 400|600) ;; *) echo "Key must have mode 0400 or 0600." >&2; exit 1 ;; esac
   key_bytes=$(wc -c < "$QWEN_API_KEY_FILE")
   (( key_bytes > 0 && key_bytes <= 4097 ))
   key="$(cat -- "$QWEN_API_KEY_FILE"; printf '.')"

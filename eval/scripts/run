@@ -10,7 +10,7 @@ repo=$(cd -- "$root/.." && pwd -P)
 usage() {
     printf '%s\n' 'Usage: eval/scripts/run PROFILE [TASKSET] [--dry-run] [--measure-power] [--output FRESH_DIRECTORY]' \
         '  tiny aime25                  Three native seed-0 shuffled math tasks; not full qualification.' \
-        '  broad [TASKSET]              Autoresearch lane tasksets after tiny/aime25: mmlu-pro 20, i3-logic 6, livecodebench 3.' \
+        '  broad [TASKSET]              Broad autoresearch suite tasksets after tiny/aime25: mmlu-pro 10, i3-logic 4, livecodebench 3.' \
         '  diverse i3-logic             First native eligible logic task; separate 8192-token sentinel.' \
         '  --output FRESH_DIRECTORY     Exclusive-create the result group at this path.' \
         '  --measure-power              Collect board energy and per-environment task efficiency.' \
@@ -18,7 +18,7 @@ usage() {
         '  --power-interval-seconds=0.5  Monotonic sample period; allowed 0.1..60 s.' \
         '  --power-max-seconds=86400     Stop collection, not evaluation, after 1..604800 s.' \
         '  --power-max-samples=200000    Bound retained observations to 2..1000000.' \
-        'QWEN_SERVING_CONTAINER selects the running EXL3 serving container (default qwen-inference-inference-1).' \
+        'QWEN_SERVING_CONTAINER selects the running EXL3 serving container (default: the one running container publishing the configs/local.toml endpoint).' \
         'Measurement is opt-in, cannot accompany --dry-run, and never changes upstream scores.'
 }
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then usage; exit 0; fi
@@ -88,6 +88,31 @@ if [[ "$dry" == false ]]; then
         case "$taskset" in mrcr-v2-*) taskset=mrcr-v2 ;; esac
         "$root/scripts/data" --check "$taskset"
     done
+    # Actual serving container: the named or the one running container that
+    # publishes the configured endpoint. Fail before any output or request.
+    endpoint=$(sed -n 's|^base_url = "http://\([0-9.]*:[0-9]*\)/v1"$|\1|p' "$root/configs/local.toml")
+    [[ "$endpoint" =~ ^[0-9.]+:[0-9]+$ ]] || { printf 'Unsupported configs/local.toml base_url\n' >&2; exit 1; }
+    published() {
+        docker container inspect --format \
+            '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{.HostIp}}:{{.HostPort}} {{end}}{{end}}' \
+            -- "$1"
+    }
+    if [[ -n "${QWEN_SERVING_CONTAINER:-}" ]]; then
+        serving=$QWEN_SERVING_CONTAINER
+        bindings=$(published "$serving")
+        [[ " $bindings " == *" $endpoint "* ]] ||
+            { printf 'Serving container %s does not publish %s\n' "$serving" "$endpoint" >&2; exit 1; }
+    else
+        containers=$(docker container ls --no-trunc --quiet)
+        matches=()
+        for container in $containers; do
+            bindings=$(published "$container")
+            if [[ " $bindings " == *" $endpoint "* ]]; then matches+=("$container"); fi
+        done
+        [[ ${#matches[@]} -eq 1 ]] ||
+            { printf 'Expected one running container publishing %s; set QWEN_SERVING_CONTAINER\n' "$endpoint" >&2; exit 1; }
+        serving=${matches[0]}
+    fi
 fi
 # Upstream subprocess runtime has a HOME-relative cache. Never use the user's
 # home for runtime installers, scripts, platform login, or result state.
@@ -126,7 +151,7 @@ uv --version >"$group/provenance/uv-version.txt"
 serving_identity() {
     docker container inspect --format \
         '{{.Id}} {{.Image}} {{.State.Running}} {{.State.StartedAt}} {{.RestartCount}}' \
-        -- "${QWEN_SERVING_CONTAINER:-qwen-inference-inference-1}"
+        -- "$serving"
 }
 # Frozen evaluator inputs, rehashed after the run.
 input_hashes() {

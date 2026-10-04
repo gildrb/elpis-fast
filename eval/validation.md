@@ -67,6 +67,97 @@ or matched recipe comparison.
   and resolved config are byte-identical to the historical v1 lane's. No model
   endpoint was used; no task or scorer was changed.
 
+## 2026-10-04: audit of the current pins
+
+- `setup --check`, `data --check all` (all seven Hub snapshots and both MRCR
+  files) and `run PROFILE --dry-run` for all eight profiles (21 entries) pass.
+  Every resolved config names `qwen3.8-27b` at `http://127.0.0.1:18020/v1` with
+  `QWEN_API_KEY`, greedy sampling and the profile's budget. `direct/setup --check`
+  and `direct/run smoke|quick|full --dry-run` pass.
+- The serving-container default `qwen-inference-inference-1` was stale (a
+  never-started old container). `run` now records the container named by
+  `QWEN_SERVING_CONTAINER` only if it publishes the `configs/local.toml`
+  endpoint, and otherwise the one running container that does.
+- `sandbox --check` failed ("Sandbox build inputs changed"), so every non-dry
+  `run` stopped before its first native command. The recorded image
+  `sha256:facda9cb…` was built from the pre-MMLU-Pro `pyproject.toml`/`uv.lock`;
+  only those two recipe inputs changed, and neither enters the build context.
+  `eval/scripts/sandbox` (in `nix develop`) rebuilt and recorded
+  `sha256:5962c155…`. Against `facda9cb…`, all 10,400 non-`.pyc` files have equal
+  content except 35 uv HTTP-cache `.http` entries (fetch metadata).
+  `sandbox --check` passes. Later lane runs record the new image ID.
+
+## 2026-10-04: hash-locked build tools
+
+- Before: `uv sync` built the editable Verifiers and Prime Envs packages in
+  isolated build environments. `build-constraint-dependencies` pinned hatchling,
+  hatch-vcs and setuptools-scm by version only. uv fetched them and their
+  dependencies without hashes. uv 0.12.1 has no hashed build-constraint form.
+- Now: `pyproject.toml` (and `direct/mrcr`, `direct/graphwalks`) lists the build
+  tools in a default `build` dependency group and sets `no-build-isolation`.
+  `uv.lock` records them with hashes (editables 0.6, hatchling 1.32.0, hatch-vcs
+  0.5.0, setuptools-scm 9.2.2, setuptools 84.0.0, packaging 26.3, pathspec 1.1.1,
+  pluggy 1.6.0, tomlkit 0.15.1, trove-classifiers 2026.6.1.19). Every locked
+  hash matches the PyPI JSON API. uv installs these first and then builds the
+  editables in the project environment, so no build fetches an unlocked file.
+- Verifiers has a dynamic version. `[[tool.uv.dependency-metadata]]` gives uv
+  its static metadata, so the lock does not need a build. uv does not compare it
+  with the build. `setup` and `direct/setup` now build the metadata with the locked
+  hatchling and fail on any difference (shown with a changed version and with a
+  removed requirement).
+- `uv lock --offline` changed `uv.lock` only by these additions, the
+  dependency-metadata entry and the Verifiers lock metadata. No runtime package
+  version changed. A new virtual environment synced offline with
+  `--locked`; uv reported "Prepared 9 packages without build isolation".
+- `setup --check`, `direct/setup --check`, `run tiny --dry-run` and
+  `direct/run smoke --dry-run` pass.
+- `pyproject.toml` and `uv.lock` are sandbox recipe inputs, so `sandbox --check`
+  failed after this change. `eval/scripts/sandbox` re-recorded the image as
+  `sha256:d6a4517c…`. Its RootFS layer list is identical to `sha256:5962c155…`;
+  neither file enters the image build context. `sandbox --check` passes.
+- `direct/setup` now runs uv with `--directory`: uv 0.12.1 reports the
+  dynamic-version lock as stale with `--project` from another directory. It also
+  sets `GIT_LFS_SKIP_SMUDGE=1` and uses the Nix `python3.12`.
+
+## 2026-10-04: Dependabot advisories
+
+- urllib3 2.7.0 -> 2.8.0 (GHSA-vxq7-64xx-v4gw, GHSA-8988-9cw3-xx77,
+  GHSA-gh4c-6fx4-qh6g) and PyJWT 2.14.0 -> 2.15.0 (GHSA-42vr-xj54-vc7v) in
+  `uv.lock`, `direct/graphwalks/uv.lock` and `direct/mrcr/uv.lock`. `uv lock
+  --upgrade-package urllib3==2.8.0 --upgrade-package pyjwt==2.15.0` (uv 0.12.1,
+  `nix develop`) changed only these two packages and their hashes. No
+  `pyproject.toml` changed. The `build` group is unchanged and stays hashed.
+- datasets stays 4.6.1 in `direct/`. GHSA-379c-qx7v-6h59 is fixed in 5.0.1, but
+  the pinned Verifiers 0.1.15.dev17 declares `datasets>=3.0.0,<4.7.0`.
+  `direct/setup --check` runs `uv pip check` and fails on that conflict. The
+  advisory is a path traversal through `file_name` metadata in folder-based
+  builders (imagefolder, audiofolder, videofolder). The direct runtime does not
+  use them:
+  - A search of the pinned Verifiers tree (`977e3fc4`, both `verifiers` and
+    `verifiers-graphwalks` checkouts), `graphwalks.py`, `mrcr_v2.py` and
+    `eval/direct/{run,setup,inspect_dataset.py,prepare_transport.py,configs}`
+    finds no `imagefolder`, `audiofolder`, `videofolder`, `FolderBasedBuilder`,
+    `file_name` or `save_to_disk`.
+  - The one `push_to_hub` is `verifiers/utils/save_utils.py:884`. It runs only if
+    `save_to_hf_hub` is true (`utils/eval_utils.py:1134`,
+    `envs/environment.py:1102`). All 11 `direct/configs/*/*.toml` set
+    `save_to_hf_hub = false` (line 11).
+  - GraphWalks: `graphwalks.py:188` calls `load_dataset("openai/graphwalks")`.
+    `run` links that name to the snapshot `f338bb26…`. It holds only `README.md`
+    and two parquet files, sha256 `54036036…` and `53787943…` in
+    `datasets.lock`. The smoke dry run recorded `builder_name: parquet`, 1150
+    rows.
+  - MRCR: `mrcr_v2.py` does not import `datasets`. It reads the two CSV files
+    with `csv.DictReader` (`mrcr_v2.py:113-114`). `datasets.lock` pins their GCS
+    generation, size and sha256 (`c6be39bc…`, `fe3b726c…`). `run` checks them
+    with `scripts/data --check` before it loads them. The download at
+    `mrcr_v2.py:99-102` runs only for a missing file.
+- `setup` and `direct/setup` (sync mode) installed the new versions. `setup
+  --check`, `direct/setup --check`, `run tiny --dry-run` and `direct/run smoke
+  --dry-run` pass.
+- `eval/scripts/sandbox` re-recorded the image as `sha256:93ac158c…`. Its RootFS
+  layer list is identical to `sha256:d6a4517c…`. `sandbox --check` passes.
+
 ## Failures found and fixed during integration
 
 A raw HF snapshot is not enough for a fresh offline repository-name lookup.

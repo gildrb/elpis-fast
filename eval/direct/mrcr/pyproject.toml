@@ -4,11 +4,79 @@ version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = ["verifiers==0.1.15.dev17", "mrcr-v2==0.1.1"]
 
+# Build tools are locked dependencies with hashes. Builds use the project
+# environment, so uv never fetches unlocked build requirements.
+[dependency-groups]
+build = ["editables==0.6", "hatchling==1.32.0"]
+
 [tool.uv]
 package = false
 required-version = "==0.12.1"
-build-constraint-dependencies = ["hatchling==1.32.0"]
+default-groups = ["build"]
+no-build-isolation = true
 
 [tool.uv.sources]
 verifiers = { path = "../.sources/verifiers", editable = true }
 mrcr-v2 = { path = "../.sources/prime-envs/environments/mrcr_v2", editable = true }
+
+# verifiers has a dynamic version. Static metadata lets uv lock and check it
+# before the build tools are installed. uv does not compare it with the build,
+# so eval/direct/setup compares it with the metadata hatchling builds.
+[[tool.uv.dependency-metadata]]
+name = "verifiers"
+version = "0.1.15.dev17"
+requires-python = "<3.14,>=3.10"
+requires-dist = [
+    "aiolimiter>=1.2.1",
+    "anthropic>=0.78.0",
+    "datasets<4.7.0,>=3.0.0",
+    "gepa",
+    "httpx>=0.27.0",
+    "jinja2>=3.1.6",
+    "math-verify>=0.8.0",
+    "mcp>=1.14.1",
+    "msgpack>=1.1.2",
+    "nest-asyncio>=1.6.0",
+    "numpy",
+    "openai-agents>=0.0.7",
+    "openai>=1.108.1",
+    "prime-pydantic-config[toml]",
+    "prime-sandboxes>=0.2.25",
+    "prime-tunnel>=0.1.6",
+    "pydantic>=2.11.9",
+    "pyzmq>=27.1.0",
+    "regex<2026.4.4",
+    "requests",
+    "rich",
+    "setproctitle>=1.3.0",
+    "tenacity>=8.5.0",
+    "textual",
+    "tomli; python_version < '3.11'",
+    "typing-extensions; python_version < '3.12'",
+    "uvloop>=0.21.0; sys_platform != 'win32' and sys_platform != 'cygwin' and platform_python_implementation != 'PyPy'",
+    "aiohttp>=3.9.0; extra == 'browser'",
+    "python-dotenv>=1.0.0; extra == 'browser'",
+    "stagehand>=3.0.0; extra == 'browser'",
+    "harnesses>=0.1.1; extra == 'harnesses'",
+    "harnesses[nemogym]>=0.1.1; extra == 'nemogym'",
+    "tasksets[nemogym]>=0.1.1; extra == 'nemogym'",
+    "tasksets[openenv]>=0.1.1; extra == 'openenv'",
+    "tasksets[openreward]>=0.1.1; extra == 'openreward'",
+    "harnesses>=0.1.1; extra == 'packages'",
+    "tasksets[openenv,openreward,ta]>=0.1.1; extra == 'packages'",
+    "renderers>=0.1.8.dev28; extra == 'renderers'",
+    "reasoning-gym; extra == 'rg'",
+    "accelerate>=1.4.0; extra == 'rl'",
+    "deepspeed>=0.17.6; extra == 'rl'",
+    "flash-attn>=2.8.3; extra == 'rl'",
+    "liger-kernel>=0.5.10; extra == 'rl'",
+    "peft; extra == 'rl'",
+    "requests; extra == 'rl'",
+    "torch<2.9.0,>=2.8.0; extra == 'rl'",
+    "transformers>=4.56.2; extra == 'rl'",
+    "vllm<0.11.0,>=0.10.0; extra == 'rl'",
+    "wandb; extra == 'rl'",
+    "nltk; extra == 'ta'",
+    "textarena; extra == 'ta'",
+    "tasksets[openenv,openreward,ta]>=0.1.1; extra == 'tasksets'",
+]
