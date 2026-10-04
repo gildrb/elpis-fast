@@ -16,7 +16,9 @@ nix develop . --no-write-lock-file -c uv run --locked --python python3.13 --no-m
 ```
 
 Add `--offline` after `uv run` once the locked environment is available.
-Ruff 0.16.7 and ty 0.0.80 are exact development pins. Serving runtime pins are separate from the upstream evaluation environment
+Ruff 0.16.10 and ty 0.0.80 are exact development pins. tokenizers 0.23.2 matches
+the serving image (`docker/base/requirements.lock`) so ty resolves `bench/exl3.py`.
+Serving runtime pins are separate from the upstream evaluation environment
 pins described in [eval/README.md](../eval/README.md).
 
 ## Policy

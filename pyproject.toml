@@ -9,12 +9,13 @@ package = false
 
 [dependency-groups]
 dev = [
-    "ruff==0.16.7",
+    "ruff==0.16.10",
+    "tokenizers==0.23.2",
     "ty==0.0.80",
 ]
 
 [tool.ruff]
-required-version = "==0.16.7"
+required-version = "==0.16.10"
 target-version = "py313"
 line-length = 88
 preview = true
