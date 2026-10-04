@@ -223,3 +223,11 @@ import ./bend/prefill_nosync_laws.bend as PrefillNosyncLaws
 # 75.6, no integer kq equals it) and the partial bound is 512064, not the per-group design's 32 * 127 * 7 = 28448; the rounding
 # points of a score are Q rotation, Q quantisation, K requantisation, rs, skk, rs * sk and the final multiply, the integer core none.
 import ./bend/pattn8i_int_laws.bend as Pattn8iIntLaws
+# ext 9601 tree pipe (bend/tree_pipe.bend, reference bend/tree_pipe_spec.bend): the verify consumes the
+# device-staged TreeDesc, positions and embedded rows, and the host checks the record and the consumed inputs
+# after the launch. For every consumed input (faults included) the round emits exactly the sequential round's
+# ids or failure; the speculative verify is kept only when the record passed and the input equals the
+# sequential upload (every mismatch discards and recomputes); the stage kernel writes exactly that upload for
+# every well-shaped record, so a fault-free round is kept; under spec_inv_tree's hypotheses the emitted ids
+# commit the greedy continuation; dropping the readback comparison breaks the refinement (witness).
+import ./bend/tree_pipe_laws.bend as TreePipeLaws
