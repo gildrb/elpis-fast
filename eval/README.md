@@ -208,7 +208,7 @@ search them. A `128k-256k` file bucket neither sends that many tokens to Qwen no
 proves it fits the configured model window. LongBench-Pro adds document-understanding
 metrics, but also file/REPL harness behavior, excluded task families and extra
 dependencies; GraphWalks is the simpler complementary choice here. Direct-context
-rows live in `eval/direct/` and the EXL3 benchmark lane (`bash autoresearch.sh`).
+rows live in `eval/direct/` and the EXL3 benchmark lane (`bash bench/lane.sh`).
 
 The sandbox build uses upstream program bytes and native uv locks only. It does
 not alter an environment or scorer. Its build context excludes datasets, model

@@ -49,6 +49,7 @@ extra-paths = ["bend", "bend/gen"]
 exclude = [
     "serve/exl3_server.py",
     "bench/exl3_accept_latency.py",
+    "bench/ar_gpu.py",
     "eval/direct",
 ]
 

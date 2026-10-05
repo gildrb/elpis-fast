@@ -1,5 +1,5 @@
 # Copyright (c) 2026 inference contributors.
-"""Cold-prefill TTFT ladder for the EXL3 lane; see autoresearch.sh.
+"""Cold-prefill TTFT ladder for the EXL3 lane; see bench/lane.sh.
 
 Every row sends one non-streaming 1-token request (TTFT) and then the same
 prompt with a 32-token budget (continuation). A unique leading nonce line makes

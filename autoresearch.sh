@@ -1,79 +1,72 @@
 #!/usr/bin/env bash
-# Finite EXL3 + Bend native cold-prefill TTFT measurement; never a deployment/promotion command.
+# Autoresearch harness for elpis-fast: decode + prefill speed of this checkout.
+#   1. build this checkout's candidate-ext image (docker/build-exl3.sh, under the CPU lock);
+#   2. one guarded GPU window (host ops /tmp/gpu-batch.py -> /tmp/gpu-window.sh: maintenance
+#      lease, cool-down, live baseline restored after) runs bench/ar_gpu.py in the image:
+#      cold prefill 8K x2 / 32K x2 / 128K, decode 1K / 8K / 32K x2 (256 tokens);
+#   3. bench/ar_report.py prints METRIC lines; primary speed_score =
+#      sqrt(prefill_tok_s x decode_tok_s). Quality proxies vs bench/ar_reference.json:
+#      ref_decode_equal (0-3), ref_first_token_equal (0-5).
+#   262K TTFT is not in this loop (312 s alone); confirm finalists with bench/lane.sh.
+# Evidence: /tmp/kernel-work/AR/run-STAMP/{build.log,spec.json,batch.log,gpu.log,io/}.
+# About 12 min when the build is cached (+ about 12 min when the ext recompiles);
+# give run_experiment a 2400 s timeout. The body is one function: bash parses it whole,
+# so editing this file during a run cannot change the running harness.
 set -euo pipefail
-set +x
-umask 077
-if [[ ${1:-} == --help || ${1:-} == -h ]]; then
-    cat <<'USAGE'
-Usage: bash autoresearch.sh
-Protocol exl3-native-prefill-ttft-v1 (suite prefill): cold prefill throughput of
-EXL3 + native DFlash2 serving, with the Bend acceptance identity and engine patch
-manifest recorded when the image bakes them (explicit null when absent). A new
-comparison segment: not comparable to exl3-native-broad-c1-request-v5 or any
-earlier segment (different workload and primary); it needs a fresh baseline.
-The broad decode suite (exl3-native-broad-c1-request-v5) is unchanged and stays
-selectable only as python -m bench.autoresearch --suite broad; this script always
-runs --suite prefill.
-Required private operator descriptor (no inferred inputs or environment fallback):
-  /run/user/1000/elpis-autoresearch-operator.json
-Exactly these JSON keys (replace placeholders; schema_version is integer 1):
-  {"schema_version":1,"container_id":"<full 64-hex candidate ID>",
-   "api_key_file":"/private/api-key",
-   "maintenance_directory":"/private/existing-armed-maintenance",
-   "output_directory":"/private/parent/new-autoresearch"}
-Main atomically installs a NEW uid1000-owned regular 0600 descriptor for each run.
-No symlinks; paths must be canonical and absolute. Key mode is 0400/0600.
-The window must already be armed; output must not exist. Never edit the descriptor
-during a run: supervisor/worker bind its file identity and exact content digest.
-Prerequisites: prepared offline eval/.venv (with tokenizers), Docker access
-(read-only inspect and one read-only in-container hashing probe via docker exec),
-host nvidia-smi, and a healthy owned EXL3 instance at http://127.0.0.1:18020
-serving qwen3.8-27b with max_model_len 262144, target/draft mounted under /models,
-on one RTX 3090 at 350 W with clock offsets core 0 / memory 0 MHz (host policy;
-checked, never set).
-Rootless Docker is fixed to unix:///run/user/1000/docker.sock.
-The prepared Python supervisor enters pinned offline Nix only for its worker;
-Nix startup and owned-process cleanup are inside the whole-command deadline.
-Main must already own the maintenance window and perform recovery afterwards.
-The deadline is min(2400 seconds, guardian remaining time minus 120 seconds).
-There is no retry, row reduction, capacity probe, deployment or promotion.
-Workload: a ladder of raw-content depths (served tokenizer, no specials, +-2
-tokens), ascending, repetitions consecutive:
-  8192 x3, 32768 x3, 131072 x2, 262000 x1   (9 rows)
-Each row's content is the nonce line "[prefill measurement R of N at depth D]",
-a prefix of the frozen bench/throughput-prompts.jsonl corpus (the C1 prompts
-repeated to cover 1.05 x 262000 tokens), a blank line and the fixed C1
-instruction. The unique leading nonce makes every row's first 256-token KV page
-unique, so every TTFT request is a cold prefill with no prefix reuse (no flush,
-no warmup). All request bytes are frozen and rendered through
-/v1/chat/completions/render before any generation (rendered + 32 <= 262144).
-Per row, sequentially (concurrency 1, greedy, top_p 1, n 1, non-streaming):
-  TTFT request          max_tokens 1  (cold prefill + first verify round + HTTP)
-  continuation request  max_tokens 32 (same prompt; reuses the prefix just computed)
-Wall time is monotonic from request send through complete response body. Streaming
-TTFT is unavailable (the server buffers SSE), so TTFT is that 1-token request.
-Only complete raw-evidence-admitted measurements print METRIC name=value:
-  prefill_tok_s (primary: geometric mean over the four depths of
-    prefill_tok_s_<d>),
-  prefill_tok_s_<d> (sum of native prompt_tokens / sum of TTFT wall seconds),
-  ttft_s_<d> (mean TTFT wall seconds),
-  reuse_request_s_<d> (mean continuation wall seconds; informational),
-    for d in 8192, 32768, 131072, 262000,
-  elapsed_seconds.
-No quality, reward, decode throughput or power is measured by this suite.
-Artifacts: OUTPUT/{prefill,logs,sources}, identity-before/after.json,
-supervisor.json, benchmark.json, admitted.json, measurement.json;
-failure.json/worker-failure.json on rejection (nonzero exit, no METRIC lines).
-USAGE
-    exit 0
-fi
-[[ $# -eq 0 ]] || { printf 'Use bash autoresearch.sh --help\n' >&2; exit 2; }
+main() {
+umask 022
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-[[ -x "$root/eval/.venv/bin/python" ]] || { printf 'Prepared eval/.venv is required; no installation is performed.\n' >&2; exit 2; }
-unset PYTHONPATH PYTHONHOME QWEN_API_KEY OPENAI_API_KEY DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LC_ALL=C
-export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1
-export UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never
-export DOCKER_HOST=unix:///run/user/1000/docker.sock
+# The Bend acceptor root (proof gates + emitted C, about 7 min) depends only on bend/
+# and the flake toolchain: build it once per content hash, reuse it after.
+bkey=$(cd -- "$root" && find bend flake.nix flake.lock -type f ! -name '*.pyc' -print0 |
+	sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+bcache=/tmp/kernel-work/AR/bend-exl3-$bkey
 cd -- "$root"
-exec "$root/eval/.venv/bin/python" -m bench.autoresearch --suite prefill
+export DOCKER_HOST=unix:///run/user/1000/docker.sock GPU_COOL_GAP=120
+stamp=$(date +%Y%m%d-%H%M%S)
+out=/tmp/kernel-work/AR/run-$stamp
+tag=qwen-inference:ar-candidate
+mkdir -p /tmp/kernel-work/AR
+mkdir "$out" "$out/io"
+t0=$(date +%s)
+
+echo "build $(date +%T) -> $out/build.log (bend root ${bcache##*/}: $([[ -d $bcache ]] && echo cached || echo new))"
+prebuilt=()
+[[ -d $bcache ]] && prebuilt=(env "EXL3_BEND_PREBUILT=$bcache")
+if ! /tmp/cpu-lock.sh "${prebuilt[@]}" bash docker/build-exl3.sh candidate-ext "$tag" \
+	>"$out/build.log" 2>&1; then
+	tail -n 40 "$out/build.log" >&2
+	echo "BUILD FAILED" >&2
+	exit 1
+fi
+[[ -d $bcache ]] || cp -a -- build/bend-exl3 "$bcache"
+img=$(docker image inspect -f '{{.Id}}' "$tag")
+echo "image $img ($(( $(date +%s) - t0 )) s)"
+
+python3 -I -B - "$out" "$root" "$img" "$stamp" >"$out/spec.json" <<'PY'
+import json, sys
+out, root, img, stamp = sys.argv[1:]
+cmd = ["/opt/venv/bin/python", "-I", "-B", "/work/ar_gpu.py"]
+print(json.dumps({"batch": f"ar-{stamp}", "payloads": [{
+    "name": f"qwen-exl3-ar-{stamp}", "image": img, "window": f"comp-window-ar-{stamp}",
+    "lease": 1200, "run_timeout": 900, "gpu_seconds": 480, "log": f"{out}/gpu.log",
+    "cmd": cmd, "dry_cmd": [*cmd, "--dry-run"], "dry_timeout": 900,
+    "mounts": [f"{root}/bench:/work:ro", f"{out}/io:/out"],
+    "outputs": [f"{out}/io/result.json"]}]}, indent=1))
+PY
+
+# One GPU user at a time: wait for other batches and approvals to clear.
+while pgrep -f '[g]pu-batch.py /' >/dev/null || grep -qv '^#' /tmp/elpis-gpu-allow 2>/dev/null; do
+	sleep 30
+done
+echo "gpu window $(date +%T) -> $out/batch.log"
+if ! python3 /tmp/gpu-batch.py "$out/spec.json" >"$out/batch.log" 2>&1; then
+	tail -n 60 "$out/batch.log" >&2
+	echo "GPU BATCH FAILED" >&2
+	exit 1
+fi
+grep -E '^\[(prefill|decode)\]' "$out/gpu.log" || true
+python3 -I -B bench/ar_report.py "$out/io/result.json" bench/ar_reference.json
+echo "METRIC elapsed_s=$(( $(date +%s) - t0 ))"
+}
+main "$@"

@@ -17,6 +17,6 @@ run=(uv run --locked --python python3.13 --no-managed-python)
 "${run[@]}" ty check .
 docker run --rm --network none -v "$root:/w:ro" -v "$root/.venv/bin/ty:/usr/local/bin/ty:ro" \
   -w /w --entrypoint ty "$image" check --python /opt/venv/bin/python3 \
-  serve/exl3_server.py bench/exl3_accept_latency.py
+  serve/exl3_server.py bench/exl3_accept_latency.py bench/ar_gpu.py
 eval/direct/setup --check
 "${run[@]}" ty check --python eval/direct/mrcr/.venv --python-version 3.12 eval/direct

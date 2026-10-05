@@ -75,9 +75,15 @@ if [[ "$variant" != baseline ]]; then
   build_args=(--build-arg "EXL3_PATCHES_SHA256=$patches_sha")
   # Proof gate, emitted C, library and admission, all from the pinned flake toolchain;
   # the image build then re-verifies every output against the manifest pins.
+  # EXL3_BEND_PREBUILT: an earlier exl3_build.py output of the same bend/ sources
+  # (autoresearch.sh keys it by their hash); the image build re-verifies it the same way.
   rm -rf -- "$root/build/bend-exl3"
-  (cd -- "$root" && nix develop --offline --no-write-lock-file -c \
-    python3 -B bend/exl3_build.py --output build/bend-exl3)
+  if [[ -n "${EXL3_BEND_PREBUILT:-}" ]]; then
+    cp -a -- "$EXL3_BEND_PREBUILT" "$root/build/bend-exl3"
+  else
+    (cd -- "$root" && nix develop --offline --no-write-lock-file -c \
+      python3 -B bend/exl3_build.py --output build/bend-exl3)
+  fi
 fi
 
 # Use the daemon-backed default builder, not an independently selected remote one.

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Gil Rodrigues
-"""Finite EXL3 + Bend lane: one explicitly selected suite; see autoresearch.sh.
+"""Finite EXL3 + Bend lane: one explicitly selected suite; see bench/lane.sh.
 
 Suites: ``broad`` (native tasksets + C1 whole requests) and ``prefill`` (the
 cold-prefill TTFT ladder in ``bench.prefill``). This supervisor never operates
@@ -1017,7 +1017,7 @@ BROAD = Suite(
     ),
     optional_metrics=("spec_accept_length",),
     sources=(
-        "autoresearch.sh",
+        "bench/lane.sh",
         "bench/autoresearch.py",
         "bench/autoresearch_worker.py",
         "bench/exl3.py",
@@ -1075,7 +1075,7 @@ PREFILL = Suite(
     metric_names=prefill.metric_names(prefill.LADDER),
     optional_metrics=(),
     sources=(
-        "autoresearch.sh",
+        "bench/lane.sh",
         "bench/autoresearch.py",
         "bench/autoresearch_worker.py",
         "bench/exl3.py",
@@ -1790,7 +1790,7 @@ def main() -> int:
     try:
         suite = arguments(sys.argv[1:])
     except ValueError as error:
-        sys.stderr.write(f"{error}; use bash autoresearch.sh --help\n")
+        sys.stderr.write(f"{error}; use bash bench/lane.sh --help\n")
         return 2
     try:
         return supervise(Settings.descriptor(), suite, started)

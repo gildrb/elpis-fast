@@ -1,7 +1,7 @@
 # Measurement protocol
 
 **Status:** EXL3 with native DFlash2 speculative decoding (greedy, one sequence,
-native context 262144, CQ3 cache) on one RTX 3090. `bash autoresearch.sh` runs the
+native context 262144, CQ3 cache) on one RTX 3090. `bash bench/lane.sh` runs the
 cold-prefill suite `exl3-native-prefill-ttft-v1` (§2a); the broad suite
 `exl3-native-broad-c1-request-v5` (§2) stays selectable with `--suite broad`.
 
@@ -37,7 +37,7 @@ gated and its scorer can fall back to a remote LLM judge.
 
 `python -m bench.autoresearch --suite broad` (`bench/autoresearch.py`
 supervisor, `bench/autoresearch_worker.py` worker, `bench/exl3.py` identity,
-native taskset and C1 logic; same environment as `autoresearch.sh`) runs
+native taskset and C1 logic; same environment as `bench/lane.sh`) runs
 exactly once, in this order:
 
 | Order | Workload | Frozen selection and settings |
@@ -219,7 +219,7 @@ Not measured by this lane: TTFT, committed decode throughput, power/energy and
 
 ## 2a. Cold-prefill suite (`exl3-native-prefill-ttft-v1`)
 
-`bash autoresearch.sh` = `python -m bench.autoresearch --suite prefill` (`bench/prefill.py`). The suite is required, with no default. Operator contract, serving identity, guard checkpoints, 2400 s deadline and evidence retention are those of §2.
+`bash bench/lane.sh` = `python -m bench.autoresearch --suite prefill` (`bench/prefill.py`). The suite is required, with no default. Operator contract, serving identity, guard checkpoints, 2400 s deadline and evidence retention are those of §2.
 
 | Depth (raw content, ±2 tokens) | Repetitions | Rendered prompt tokens (live plan, 2026-09-29) |
 |---|---|---|
@@ -379,7 +379,7 @@ They are run from `/tmp`: copy them back there, `invariance.py` to
 - `mkcand.py` and `gpu-window.sh` precreate and run guarded GPU windows around the
   retained guardian.
 - `build-one.sh` builds a candidate from the committed series plus extra patches.
-- `ar-serve.sh` and `ar-when-built.sh` open the timing window for `bash autoresearch.sh`.
+- `ar-serve.sh` and `ar-when-built.sh` open the timing window for `bash bench/lane.sh`.
 - `gpu-inv.sh` and `inv-compare.py` run the invariance gate.
 - `ar-energy.py` and `step-report.py` give per-call tok/J and step efficiency.
 

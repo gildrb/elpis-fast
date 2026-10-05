@@ -13,6 +13,6 @@
 /PROOF.bend          @gildrb
 /bend/               @gildrb
 /eval/scripts/       @gildrb
-/autoresearch.sh     @gildrb
+/bench/lane.sh       @gildrb
 /SECURITY.md         @gildrb
 /LICENSE             @gildrb

@@ -18,7 +18,7 @@ context is a measured operating point, never a new model limit.
 | Runtime | Docker Compose; Nix supplies development tools, the `.#bend` toolchain and a thin adapter |
 | GPU driver, storage, fan and optional power cap | Host |
 | Capability tasks, scoring, rewards and traces | Pinned Prime Envs + Verifiers in `eval/` |
-| Throughput measurement | `bash autoresearch.sh` EXL3 lane ([protocol](benchmarks.md)) |
+| Throughput measurement | `bash bench/lane.sh` EXL3 lane ([protocol](benchmarks.md)) |
 | Proven decision logic | Bend modules under `bend/`, checked through `PROOF.bend` |
 
 No private engine fork, vendored upstream source tree or runtime source overlay.

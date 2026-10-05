@@ -276,7 +276,7 @@ def main() -> int:
     try:
         suite = arguments(sys.argv[1:])
     except ValueError as error:
-        sys.stderr.write(f"{error}; use bash autoresearch.sh --help\n")
+        sys.stderr.write(f"{error}; use bash bench/lane.sh --help\n")
         return 2
     try:
         return _run_worker(Settings.descriptor(), suite)
