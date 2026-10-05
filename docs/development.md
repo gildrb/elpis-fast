@@ -137,6 +137,7 @@ made with `--through` the patch whose number is `n`.
 | `prefill_merge_diff.py` | `OUT9502/patched` | 5110h replaces `M4096_MAX_PROMPT = 131072`. |
 | `prefill_membound_diff.py` | `OUT5110h/patched` | 9503b changes the stage bound. |
 | `qc_staging_diff.py` | `OUT/patched` with 9503f and 9503b in the series | Evaluates the engine's `qc_staging_pages` against the Bend model. |
+| `tree_pipe_diff.py` | `OUT/patched` | Pins 9601's stage kernel, host upload, readback check and settle (including the GDN conv window save / restore). Proof gate: `nix run .#bend-verdict -- bend/tree_pipe_gate.bend --verdict`. |
 | `draft_mask_diff.py` | `--engine OUT/patched` | |
 | `m16_diet_diff.py`, `m16_diet2_diff.py` | `--tree OUT/patched` | The 2106 / 2107 patch defaults to the tracked file. |
 | `m16_wsched_diff.py` | `--tree OUT/patched` | Reference: `bend/gen/m16_wsched_ref.py`. |
