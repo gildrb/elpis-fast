@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Gil Rodrigues
 """Emit bend/roofline.bend from the safetensors-header inventory.
 
 Byte constants are written as decimal digit lists (Bin.dec) so the checker
@@ -9,7 +10,8 @@ safetensors headers of the target and draft models.
 Output: the Bend source, on stdout.
 
 Regenerate and check the tracked file (from the repository root):
-    python3 -I -B bend/gen/roofline_impl.py > /tmp/x && cmp /tmp/x bend/roofline.bend
+    python3 -I -B bend/gen/roofline_impl.py > /tmp/x &&
+        cmp /tmp/x bend/roofline.bend
 
 Origin: the generator of the roofline work. Only the input path handling, the
 generator lines of the header, the value check and the UTF-8 output changed.
@@ -32,12 +34,36 @@ C = json.loads(parser.parse_args().inventory.read_text(encoding="utf-8"))
 
 
 def dg(n: int) -> str:
+    """Return ``n`` as a Bend list of decimal digits.
+
+    Args:
+        n: Non-negative integer.
+
+    Returns:
+        The digit list source text.
+
+    """
     return "[" + ", ".join(f"{c}n" for c in str(n)) + "]"
 
 
-def const(name: str, value: int, cite: str) -> str:
+def const(name: str, value: object, cite: str) -> str:
+    """Return the Bend definition of one byte-count constant.
+
+    Args:
+        name: Bend definition name.
+        value: Inventory value; must be a non-negative ``int``.
+        cite: Citation comment text.
+
+    Returns:
+        The definition source text.
+
+    Raises:
+        SystemExit: If ``value`` is not a byte count.
+
+    """
     if type(value) is not int or value < 0:
-        raise SystemExit(f"roofline_impl: FAIL: {name}: {value!r} is not a byte count")
+        msg = f"roofline_impl: FAIL: {name}: {value!r} is not a byte count"
+        raise SystemExit(msg)
     return f"# {cite}\ndef {name}() -> N.Bin:\n  N.Bin.dec({dg(value)})\n"
 
 
@@ -46,7 +72,10 @@ TENSORS = [
     (
         "mlp_gate",
         "mlp_gate",
-        "layers.*.mlp.gate_proj.{trellis [320,1088,64] I16, suh [5120], svh [17408] F16}",
+        (
+            "layers.*.mlp.gate_proj.{trellis [320,1088,64] I16, "
+            "suh [5120], svh [17408] F16}"
+        ),
     ),
     ("mlp_up", "mlp_up", "layers.*.mlp.up_proj.{trellis [320,1088,64] I16, suh, svh}"),
     (
@@ -108,22 +137,34 @@ TENSORS = [
     (
         "d_q",
         "d_q",
-        "draft layers.*.self_attn.q_proj.{trellis [320,256,64] I16, suh [5120], svh [4096]}",
+        (
+            "draft layers.*.self_attn.q_proj.{trellis [320,256,64] I16, "
+            "suh [5120], svh [4096]}"
+        ),
     ),
     (
         "d_k",
         "d_k",
-        "draft layers.*.self_attn.k_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+        (
+            "draft layers.*.self_attn.k_proj.{trellis [320,64,64] I16, "
+            "suh [5120], svh [1024]}"
+        ),
     ),
     (
         "d_v",
         "d_v",
-        "draft layers.*.self_attn.v_proj.{trellis [320,64,64] I16, suh [5120], svh [1024]}",
+        (
+            "draft layers.*.self_attn.v_proj.{trellis [320,64,64] I16, "
+            "suh [5120], svh [1024]}"
+        ),
     ),
     (
         "d_o",
         "d_o",
-        "draft layers.*.self_attn.o_proj.{trellis [256,320,64] I16, suh [4096], svh [5120]}",
+        (
+            "draft layers.*.self_attn.o_proj.{trellis [256,320,64] I16, "
+            "suh [4096], svh [5120]}"
+        ),
     ),
     ("d_gate", "d_gate", "draft layers.*.mlp.gate_proj (as target)"),
     ("d_up", "d_up", "draft layers.*.mlp.up_proj (as target)"),
@@ -274,7 +315,8 @@ def attn_proj() -> N.Bin:
   plus([attn_q(), attn_k(), attn_v(), attn_o()])
 
 def draft_layer() -> N.Bin:
-  plus([d_q(), d_k(), d_v(), d_o(), d_gate(), d_up(), d_down(), d_akp(), d_mkp(), d_abk(),
+  plus([d_q(), d_k(), d_v(), d_o(), d_gate(), d_up(), d_down(), d_akp(), d_mkp(), \
+d_abk(),
     d_mbk(), d_ln_in(), d_ln_post(), d_qn(), d_kn()])
 
 # ---- phases: one form per kernel-trace-3 bucket (kernel_trace.py BUCKETS) ----
@@ -295,11 +337,13 @@ def ph_attn_proj_gemm() -> N.Form:
 # split + combine + rope/quant/norm kernels: reads d + 8 tokens, writes 8.
 def ph_attention() -> N.Form:
   +kv = times(16n, kv_tok())
-  N.Form{plus([times(16n, N.Bin.add(attn_qn(), attn_kn())), times(8n, kv), times(8n, kv)]),
+  N.Form{plus([times(16n, N.Bin.add(attn_qn(), attn_kn())), times(8n, kv), \
+times(8n, kv)]),
     kv, N.BE{}, N.BE{}}
 
 def ph_norms_residual() -> N.Form:
-  N.Form.const(plus([times(64n, N.Bin.add(ln_in(), ln_post())), final_norm(), taps_write()]))
+  N.Form.const(plus([times(64n, N.Bin.add(ln_in(), ln_post())), final_norm(), \
+taps_write()]))
 
 def ph_lm_head() -> N.Form:
   N.Form.const(N.Bin.add(head(), logits()))
@@ -332,8 +376,10 @@ def ph_memcpy() -> N.Form:
 # L2-resident immediate reads): target_mlp_other, sampler, draft_sample_topk,
 # draft_sample_other, and the idle time between kernels.
 def phases() -> List<&2, N.Form>:
-  [ph_target_mlp_gemm(), N.Form.zero(), ph_gdn_gemm(), ph_gdn_small(), ph_attn_proj_gemm(),
-    ph_attention(), ph_norms_residual(), ph_lm_head(), N.Form.zero(), ph_draft_forward(),
+  [ph_target_mlp_gemm(), N.Form.zero(), ph_gdn_gemm(), ph_gdn_small(), \
+ph_attn_proj_gemm(),
+    ph_attention(), ph_norms_residual(), ph_lm_head(), N.Form.zero(), \
+ph_draft_forward(),
     ph_draft_sample_head(), N.Form.zero(), ph_draft_sample_walk(), N.Form.zero(),
     ph_rewind_replay(), ph_draft_kv_refresh(), ph_memcpy(), N.Form.zero()]
 
@@ -355,7 +401,8 @@ def conv_state() -> N.Bin:
   times(48n, plus([conv_read(), conv_write(), times(2n, conv_read())]))
 
 def fixed_activations() -> N.Bin:
-  plus([times(48n, times(8n, statics_row())), times(2n, logits()), taps_write(), gathers(),
+  plus([times(48n, times(8n, statics_row())), times(2n, logits()), taps_write(), \
+gathers(),
     times(2n, embed_up())])
 
 # c0: all fixed bytes, incl. the 8 new target KV tokens written and read back
@@ -371,7 +418,8 @@ def round() -> N.Form:
 # ---- reference totals the trace prints (differential anchors) ----
 # kernel_trace.py target_all_weight_gemms: mlp + gdn qkv/z/out + attn qkvo + lm_head.
 def trace_target_gemm_bytes() -> N.Bin:
-  plus([times(64n, mlp_layer()), times(48n, gdn_proj()), times(16n, attn_proj()), head()])
+  plus([times(64n, mlp_layer()), times(48n, gdn_proj()), times(16n, attn_proj()), \
+head()])
 
 # kernel_trace.py draft_forward_linears: q, k, v, o, gate, up, down of 5 layers.
 def trace_draft_linears() -> N.Bin:

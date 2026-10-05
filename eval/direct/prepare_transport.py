@@ -71,7 +71,7 @@ if arguments.source.read_bytes() != source_bytes:
     message = "Frozen config changed during transport preparation."
     raise ValueError(message)
 operator_recipe_identity = os.environ.get("QWEN_RECIPE_ID")
-if operator_recipe_identity is None or operator_recipe_identity == "":
+if not operator_recipe_identity:
     operator_recipe_identity = "unverified-running-deployment"
 provenance = {
     "original_config": str(arguments.source),

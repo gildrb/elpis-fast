@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Gil Rodrigues
 """Generate the tree acceptance table programs.
 
 Outputs, written into the existing directory OUT:
@@ -30,7 +31,9 @@ parser.add_argument(
 )
 out = parser.parse_args().out_dir
 if not out.is_dir():
-    raise SystemExit(f"gen_table: FAIL: {out} is not a directory")
+    msg = f"gen_table: FAIL: {out} is not a directory"
+    raise SystemExit(msg)
+LAST_LEVEL = 7
 R = range(1, 8)
 T = ", ".join(f"t{i}" for i in range(8))
 X = ", ".join(f"x{i}" for i in R)
@@ -51,16 +54,38 @@ TPL = f"~acc: {ACC_T}, ~der: {DER_T}"
 TARGS = "~acc, ~der"
 
 
-def tv(i):  # verify id of row i in the table
+def tv(i: int) -> str:
+    """Return the verify id of row ``i`` in the table.
+
+    Args:
+        i: Row index.
+
+    Returns:
+        The verify id as text.
+
+    """
     return f"{100 + i}"
 
 
-def call(budget, cp, ns, s, xs):
+def call(budget: str, cp: str, ns: str, s: list[str], xs: list[str]) -> str:
+    """Render one ``acc`` call for the table.
+
+    Args:
+        budget: Budget argument text.
+        cp: Checkpoint argument text.
+        ns: Stop count argument text.
+        s: Stop row argument texts.
+        xs: Draft argument texts.
+
+    Returns:
+        The rendered call.
+
+    """
     ts = ", ".join(tv(i) for i in range(8))
     return f"acc({Q}, {budget}, {cp}, {ns}, {', '.join(s)}, {ts}, {', '.join(xs)})"
 
 
-table = []
+table: list[str] = []
 w = table.append
 w("""# Rendering of the tree acceptance table (DESIGN.md §3(d) admission), shared by
 # EXL3_TREE_ACCEPT.bend (production leaves) and EXL3_TREE_ACCEPT_SPEC.bend (list
@@ -83,14 +108,16 @@ import Base
 import ./exl3_tree_accept_spec.bend as Spec
 
 def hex_digit(+n: Nat) -> Char:
-  Char.from_u32((U32.add(U32.from_nat(n), U32.mul(U32.from_nat(Nat.div(n, 10n)), 39)) + 48 : U32))
+  Char.from_u32((U32.add(U32.from_nat(n), \
+U32.mul(U32.from_nat(Nat.div(n, 10n)), 39)) + 48 : U32))
 
 def hex_bytes(bs: List<&2, Nat>, rest: String) -> String:
   match bs:
     case Nil{}:
       rest
     case +b <> more:
-      SCon{hex_digit(Nat.div(b, 16n)), SCon{hex_digit(Nat.mod(b, 16n)), hex_bytes(more, rest)}}
+      SCon{hex_digit(Nat.div(b, 16n)), \
+SCon{hex_digit(Nat.mod(b, 16n)), hex_bytes(more, rest)}}
 
 def glyph(v: Spec.TreeVerdict, rest: String) -> String:
   match v:
@@ -170,11 +197,13 @@ def rns({TPL}, n: Nat, +k: Nat, {QA}, rest: String) -> String:
         rns({TARGS}, m, 1n+k, {Q}, rest))
 
 def rcells({TPL}, {QA}, rest: String) -> String:
-  rbud({TARGS}, 9n, 1n, {Q}, rstop({TARGS}, 8n, 0n, {Q}, rns({TARGS}, 5n, 0n, {Q}, rest)))
+  rbud({TARGS}, 9n, 1n, {Q}, rstop({TARGS}, 8n, 0n, {Q}, \
+rns({TARGS}, 5n, 0n, {Q}, rest)))
 """)
 
 w(f"""def line({TPL}, {QA}) -> String:
-  "S " ++ digit(q1, digit(q2, digit(q3, digit(q4, digit(q5, digit(q6, digit(q7, " ")))))))
+  "S " ++ digit(q1, digit(q2, digit(q3, digit(q4, \
+digit(q5, digit(q6, digit(q7, " ")))))))
     ++ hex_bytes(der({Q}), " ")
     ++ wcells7({TARGS}, {Q}, " ")
     ++ rcells({TARGS}, {Q}, "")
@@ -196,7 +225,7 @@ for k in range(7, 0, -1):
     w("    case 1n+more:")
     w("      do IO<Unit>:")
     args = (prev_a + ", " if prev_a else "") + "v"
-    if k == 7:
+    if k == LAST_LEVEL:
         w(f"        IO.print(line({TARGS}, {args}))")
     else:
         w(f"        level{k + 1}({TARGS}, {k + 1}n, 0n, {args})")

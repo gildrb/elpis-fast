@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Gil Rodrigues
 """Read-only, CPU-only authentication of the approved EXL3 target/draft pair.
 
 The adjacent exl3-manifest.json is the trust root. Mount it and both model
@@ -16,9 +17,9 @@ import re
 import stat
 import sys
 from pathlib import Path
-from typing import TypeAlias
+from typing import NoReturn
 
-JSON: TypeAlias = "bool | int | float | str | list[JSON] | dict[str, JSON] | None"
+type JSON = bool | int | float | str | list[JSON] | dict[str, JSON] | None
 METADATA_LIMIT = 16 * 1024 * 1024
 CHUNK_SIZE = 8 * 1024 * 1024
 EXL3_TARGET_NAMES = frozenset({
@@ -43,47 +44,65 @@ EXL3_DRAFT_NAMES = frozenset({
 })
 
 
-def require(condition: bool, message: str) -> None:
-    """Reject a condition unless it is exactly true."""
-    if condition is not True:
-        raise ValueError(message)
+def fail(message: str) -> NoReturn:
+    """Reject the verified input.
+
+    Raises:
+        ValueError: Always, with the message.
+
+    """
+    raise ValueError(message)
 
 
 def regular(path: Path) -> None:
     """Require a regular file without following a symlink."""
-    require(stat.S_ISREG(path.lstat().st_mode), f"Not a regular file: {path}")
+    if not stat.S_ISREG(path.lstat().st_mode):
+        fail(f"Not a regular file: {path}")
 
 
 def directory(path: Path) -> None:
     """Require an absolute directory with no symlink components."""
-    require(path.is_absolute(), f"Expected absolute directory: {path}")
-    require(".." not in path.parts, f"Parent traversal forbidden: {path}")
+    if not path.is_absolute():
+        fail(f"Expected absolute directory: {path}")
+    if ".." in path.parts:
+        fail(f"Parent traversal forbidden: {path}")
     for component in (*reversed(path.parents), path):
-        require(
-            stat.S_ISDIR(component.lstat().st_mode),
-            f"Not a real directory (symlinks forbidden): {component}",
-        )
+        if not stat.S_ISDIR(component.lstat().st_mode):
+            fail(f"Not a real directory (symlinks forbidden): {component}")
 
 
 def read_bytes(path: Path, limit: int = METADATA_LIMIT) -> bytes:
-    """Read bounded metadata from a regular file."""
+    """Read bounded metadata from a regular file.
+
+    Returns:
+        The file contents.
+
+    """
     regular(path)
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
-        require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode), f"Not regular: {path}")
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            fail(f"Not regular: {path}")
         data = stream.read(limit + 1)
-    require(len(data) <= limit, f"Metadata too large: {path}")
+    if len(data) > limit:
+        fail(f"Metadata too large: {path}")
     return data
 
 
 def digest(path: Path) -> str:
-    """Hash a regular file and reject changes during verification."""
+    """Hash a regular file and reject changes during verification.
+
+    Returns:
+        The lowercase SHA256 hex digest.
+
+    """
     regular(path)
     value = hashlib.sha256()
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
         before = os.fstat(stream.fileno())
-        require(stat.S_ISREG(before.st_mode), f"Not regular: {path}")
+        if not stat.S_ISREG(before.st_mode):
+            fail(f"Not regular: {path}")
         while True:
             block = stream.read(CHUNK_SIZE)
             if len(block) == 0:
@@ -92,42 +111,48 @@ def digest(path: Path) -> str:
         after = os.fstat(stream.fileno())
     current = path.lstat()
     for snapshot in (after, current):
-        require(
-            (
-                before.st_dev,
-                before.st_ino,
-                before.st_size,
-                before.st_mtime_ns,
-                before.st_ctime_ns,
-            )
-            == (
-                snapshot.st_dev,
-                snapshot.st_ino,
-                snapshot.st_size,
-                snapshot.st_mtime_ns,
-                snapshot.st_ctime_ns,
-            ),
-            f"File changed during verification: {path}",
-        )
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            snapshot.st_dev,
+            snapshot.st_ino,
+            snapshot.st_size,
+            snapshot.st_mtime_ns,
+            snapshot.st_ctime_ns,
+        ):
+            fail(f"File changed during verification: {path}")
     return value.hexdigest()
 
 
 def json_value(value: object) -> JSON:
-    """Validate and rebuild a finite JSON value."""
+    """Validate and rebuild a finite JSON value.
+
+    Returns:
+        The rebuilt JSON value.
+
+    Raises:
+        TypeError: An object key is not a string.
+        ValueError: The value is not JSON.
+
+    """
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
-        require(math.isfinite(value), "Nonfinite JSON number")
+        if not math.isfinite(value):
+            fail("Nonfinite JSON number")
         return value
     if isinstance(value, list):
         return [json_value(item) for item in value]
     if isinstance(value, dict):
         result: dict[str, JSON] = {}
         for key, item in value.items():
-            require(isinstance(key, str), "Non-string JSON key")
             if not isinstance(key, str):
                 message = "Non-string JSON key"
-                raise ValueError(message)
+                raise TypeError(message)
             result[key] = json_value(item)
         return result
     message = "Unsupported JSON value"
@@ -135,38 +160,73 @@ def json_value(value: object) -> JSON:
 
 
 def unique_object(pairs: list[tuple[str, object]]) -> dict[str, JSON]:
-    """Build a JSON object while rejecting duplicate keys."""
+    """Build a JSON object while rejecting duplicate keys.
+
+    Returns:
+        The validated object.
+
+    """
     result: dict[str, JSON] = {}
     for key, value in pairs:
-        require(key not in result, f"Duplicate JSON key: {key}")
+        if key in result:
+            fail(f"Duplicate JSON key: {key}")
         result[key] = json_value(value)
     return result
 
 
 def obj(value: JSON) -> dict[str, JSON]:
-    """Require a JSON object."""
+    """Require a JSON object.
+
+    Returns:
+        The object.
+
+    Raises:
+        TypeError: The value is not an object.
+
+    """
     if not isinstance(value, dict):
         message = "Expected JSON object"
-        raise ValueError(message)
+        raise TypeError(message)
     return value
 
 
 def document(data: bytes) -> dict[str, JSON]:
-    """Decode a strict JSON object from UTF-8 bytes."""
+    """Decode a strict JSON object from UTF-8 bytes.
+
+    Returns:
+        The decoded object.
+
+    """
     value: object = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object)
     return obj(json_value(value))
 
 
 def integer(value: object) -> int:
-    """Require an integer other than a boolean."""
+    """Require an integer other than a boolean.
+
+    Returns:
+        The integer.
+
+    Raises:
+        TypeError: The value is not an integer or is a boolean.
+
+    """
     if not isinstance(value, int) or isinstance(value, bool):
         message = "Expected integer"
-        raise ValueError(message)
+        raise TypeError(message)
     return value
 
 
 def filename(value: object) -> str:
-    """Require a safe inventory filename."""
+    """Require a safe inventory filename.
+
+    Returns:
+        The filename.
+
+    Raises:
+        ValueError: The value is not a safe filename.
+
+    """
     if (
         not isinstance(value, str)
         or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value) is None
@@ -177,7 +237,15 @@ def filename(value: object) -> str:
 
 
 def sha256(value: object) -> str:
-    """Require a lowercase SHA256 digest."""
+    """Require a lowercase SHA256 digest.
+
+    Returns:
+        The digest.
+
+    Raises:
+        ValueError: The value is not a lowercase SHA256 digest.
+
+    """
     if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         message = "Invalid SHA256"
         raise ValueError(message)
@@ -188,7 +256,8 @@ def verify(target: Path, draft: Path) -> None:
     """Authenticate every EXL3 runtime file against the manifest."""
     preparation = Path(__file__).absolute().parent
     manifest = document(read_bytes(preparation / "exl3-manifest.json"))
-    require(integer(manifest["schema_version"]) == 1, "Unsupported EXL3 manifest")
+    if integer(manifest["schema_version"]) != 1:
+        fail("Unsupported EXL3 manifest")
     for role, path, names in (
         ("target", target, EXL3_TARGET_NAMES),
         ("draft", draft, EXL3_DRAFT_NAMES),
@@ -196,29 +265,38 @@ def verify(target: Path, draft: Path) -> None:
         hashes = {
             filename(name): sha256(value) for name, value in obj(manifest[role]).items()
         }
-        require(frozenset(hashes) == names, f"Unexpected EXL3 {role} inventory")
+        if frozenset(hashes) != names:
+            fail(f"Unexpected EXL3 {role} inventory")
         directory(path)
         entries = {entry.name: entry for entry in path.iterdir()}
-        require(names <= set(entries), f"Missing EXL3 {role} files")
+        if not names <= set(entries):
+            fail(f"Missing EXL3 {role} files")
         extras = set(entries) - names
-        require(
-            extras <= {"README.md", "LICENSE", ".gitattributes", "crc32.txt", ".cache"},
-            f"Unexpected EXL3 {role} files: {sorted(extras)}",
-        )
+        if not extras <= {
+            "README.md",
+            "LICENSE",
+            ".gitattributes",
+            "crc32.txt",
+            ".cache",
+        }:
+            fail(f"Unexpected EXL3 {role} files: {sorted(extras)}")
         for name, entry in entries.items():
             if name == ".cache":
                 directory(entry)
             else:
                 regular(entry)
         for name, checksum in hashes.items():
-            require(
-                digest(path / name) == checksum,
-                f"EXL3 {role} authentication failed: {name}",
-            )
+            if digest(path / name) != checksum:
+                fail(f"EXL3 {role} authentication failed: {name}")
 
 
 def main() -> int:
-    """Run the command and report validation failures."""
+    """Run the command and report validation failures.
+
+    Returns:
+        Zero when authenticated, one on any validation failure.
+
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--draft", required=True, type=Path)
@@ -232,7 +310,8 @@ def main() -> int:
     try:
         verify(args.target, args.draft)
     except (OSError, ValueError, KeyError, TypeError, RecursionError) as error:
-        print(f"Model verification failed: {error}", file=sys.stderr, flush=True)
+        sys.stderr.write(f"Model verification failed: {error}\n")
+        sys.stderr.flush()
         return 1
     return 0
 

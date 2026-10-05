@@ -1,4 +1,4 @@
-# Copyright (c) 2026 inference contributors.
+# Copyright (c) 2026 Gil Rodrigues
 """Finite EXL3 + Bend lane: one explicitly selected suite; see autoresearch.sh.
 
 Suites: ``broad`` (native tasksets + C1 whole requests) and ``prefill`` (the
@@ -10,30 +10,50 @@ native taskset producers, frozen requests and raw-evidence replays admit results
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
+import errno
 import hashlib
 import json
 import math
 import os
 import re
 import select
+import shutil
 import signal
 import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import FrameType
+from typing import TYPE_CHECKING
 
 from bench import exl3, prefill
 from bench.exl3 import mapping, number, sequence
+from bench.tokenizer import RawTokenizer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import FrameType
 
 ROOT = Path(__file__).resolve().parents[1]
 ENDPOINT = exl3.ENDPOINT
 OPERATOR = Path("/run/user/1000/elpis-autoresearch-operator.json")
 LIMIT_SECONDS = 2400
+OWNER_UID = 1000
+PRIVATE_DIRECTORY_MODE = 0o700
+# Printable ASCII without space (``!`` through ``~``) for the bearer key.
+KEY_FIRST_CHAR = 33
+KEY_LAST_CHAR = 126
+# Path characters: no C0 controls (below space) and no DEL.
+FIRST_PRINTABLE = 32
+DELETE = 127
+# /proc/locks row: ordinal, class, mode, access, pid, major:minor:inode, ...
+LOCK_ROW_FIELDS = 6
+LOCK_DEVICE_PARTS = 3
+# The required ``--suite NAME`` prefix of the command line.
+SUITE_ARGUMENTS = 2
 RECOVERY_HEADROOM_SECONDS = 120
 TERMINATION_SECONDS = 20
 LEASE = Path("/run/user/1000/qwen-packed64-docker-gpu0-maintenance.lock")
@@ -46,6 +66,10 @@ LAUNCH_IDENTITY = {
     "nlink": 1,
 }
 TASKSET_METRICS = ("output_tok_s", "reward", "truncated")
+POOLED_SCOPE = (
+    "every native model call of all four tasksets pooled: "
+    "sum of completion tokens / sum of model-call wall time"
+)
 # Every rejected observation is recorded privately; nothing is retried.
 FAILURES = (
     OSError,
@@ -57,13 +81,13 @@ FAILURES = (
 )
 
 
-def require(condition: bool, message: str) -> None:
-    """Reject invalid boundary inputs and incomplete observations."""
-    exl3.require(condition, message)
-
-
 def file_identity(info: os.stat_result) -> dict[str, int]:
-    """Match the guardian's inode/owner/private-mode identity contract."""
+    """Match the guardian's inode/owner/private-mode identity contract.
+
+    Returns:
+        The device, inode, owner, permission bits and link count.
+
+    """
     return {
         "dev": info.st_dev,
         "ino": info.st_ino,
@@ -74,58 +98,103 @@ def file_identity(info: os.stat_result) -> dict[str, int]:
 
 
 def private_read(path: Path, *, key: bool = False) -> tuple[bytes, dict[str, int]]:
-    """Read one bounded private file, refusing symlinks and identity races."""
+    """Read one bounded private file, refusing symlinks and identity races.
+
+    Returns:
+        The file bytes and the identity they were read under.
+
+    Raises:
+        ValueError: If the file is unsafe, oversized or changed while reading.
+
+    """
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         identity = file_identity(info)
-        require(
+        if not (
             stat.S_ISREG(info.st_mode)
             and info.st_uid == os.getuid()
             and info.st_nlink == 1
-            and stat.S_IMODE(info.st_mode) in ((0o400, 0o600) if key else (0o600,)),
-            "Unsafe private file",
-        )
+            and stat.S_IMODE(info.st_mode) in ((0o400, 0o600) if key else (0o600,))
+        ):
+            msg = "Unsafe private file"
+            raise ValueError(msg)
         raw = stream.read(4097 if key else 65537)
-        require(len(raw) <= (4096 if key else 65536), "Private file exceeds bound")
-        require(
-            identity == file_identity(path.stat(follow_symlinks=False)),
-            "Private file changed while reading",
-        )
+        if not (len(raw) <= (4096 if key else 65536)):
+            msg = "Private file exceeds bound"
+            raise ValueError(msg)
+        if identity != file_identity(path.stat(follow_symlinks=False)):
+            msg = "Private file changed while reading"
+            raise ValueError(msg)
     return raw, identity
 
 
 def private_directory(path: Path) -> dict[str, int]:
-    """Require the existing canonical private directory used by the guardian."""
-    require(
-        path.is_absolute() and path.resolve(strict=True) == path,
-        "Maintenance directory must be canonical and absolute",
-    )
+    """Require the existing canonical private directory used by the guardian.
+
+    Returns:
+        The directory identity in the guardian's status format.
+
+    Raises:
+        ValueError: If the directory is not canonical, owned and private.
+
+    """
+    if not (path.is_absolute() and path.resolve(strict=True) == path):
+        msg = "Maintenance directory must be canonical and absolute"
+        raise ValueError(msg)
     info = path.stat(follow_symlinks=False)
-    require(
+    if not (
         stat.S_ISDIR(info.st_mode)
         and info.st_uid == os.getuid()
-        and stat.S_IMODE(info.st_mode) == 0o700,
-        "Unsafe maintenance directory",
-    )
-    return {"dev": info.st_dev, "ino": info.st_ino, "uid": info.st_uid, "mode": 0o700}
+        and stat.S_IMODE(info.st_mode) == PRIVATE_DIRECTORY_MODE
+    ):
+        msg = "Unsafe maintenance directory"
+        raise ValueError(msg)
+    return {
+        "dev": info.st_dev,
+        "ino": info.st_ino,
+        "uid": info.st_uid,
+        "mode": PRIVATE_DIRECTORY_MODE,
+    }
 
 
 def process_start(pid: int) -> str:
-    """Bind a live process to its Linux start-time tick, not just a reused PID."""
-    fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
-    require(fields[0] not in ("Z", "X"), "Guardian process is not live")
+    """Bind a live process to its Linux start-time tick, not just a reused PID.
+
+    Returns:
+        The process start time in clock ticks, as text.
+
+    Raises:
+        ValueError: If the process is a zombie or dead.
+
+    """
+    fields = (
+        (Path("/proc") / str(pid) / "stat")
+        .read_text(encoding="utf-8")
+        .rsplit(")", 1)[1]
+        .split()
+    )
+    if not (fields[0] not in {"Z", "X"}):
+        msg = "Guardian process is not live"
+        raise ValueError(msg)
     return fields[19]
 
 
 def api_key(path: Path) -> str:
-    """Load the validated private bearer key; it is never written to evidence."""
+    """Load the validated private bearer key; it is never written to evidence.
+
+    Returns:
+        The key as ASCII text.
+
+    Raises:
+        ValueError: If the key is empty or not printable ASCII without spaces.
+
+    """
     raw, _ = private_read(path, key=True)
     key = raw.removesuffix(b"\n")
-    require(
-        bool(key) and all(33 <= char <= 126 for char in key),
-        "Invalid private API key",
-    )
+    if not (bool(key) and all(KEY_FIRST_CHAR <= char <= KEY_LAST_CHAR for char in key)):
+        msg = "Invalid private API key"
+        raise ValueError(msg)
     return key.decode("ascii")
 
 
@@ -143,60 +212,62 @@ class Settings:
 
     @classmethod
     def descriptor(cls) -> Settings:
-        """Load the one private descriptor without inferring any operator input."""
-        require(
-            OPERATOR.resolve(strict=True) == OPERATOR, "Operator path is not canonical"
-        )
+        """Load the one private descriptor without inferring any operator input.
+
+        Returns:
+            The validated operator settings.
+
+        Raises:
+            ValueError: If the descriptor or any input path is invalid.
+
+        """
+        if OPERATOR.resolve(strict=True) != OPERATOR:
+            msg = "Operator path is not canonical"
+            raise ValueError(msg)
         raw, identity = private_read(OPERATOR)
         value = mapping(exl3.loads(raw))
-        require(
-            set(value)
-            == {
-                "schema_version",
-                "container_id",
-                "api_key_file",
-                "maintenance_directory",
-                "output_directory",
-            },
-            "Unexpected operator descriptor keys",
-        )
-        require(
-            exl3.integer(value.get("schema_version")) == 1,
-            "Unsupported operator descriptor schema",
-        )
+        if set(value) != {
+            "schema_version",
+            "container_id",
+            "api_key_file",
+            "maintenance_directory",
+            "output_directory",
+        }:
+            msg = "Unexpected operator descriptor keys"
+            raise ValueError(msg)
+        if exl3.integer(value.get("schema_version")) != 1:
+            msg = "Unsupported operator descriptor schema"
+            raise ValueError(msg)
         container = exl3.text(value.get("container_id"))
-        require(
-            re.fullmatch(r"[0-9a-f]{64}", container) is not None,
-            "Owned container must be its full immutable ID",
-        )
+        if not (re.fullmatch(r"[0-9a-f]{64}", container) is not None):
+            msg = "Owned container must be its full immutable ID"
+            raise ValueError(msg)
         values = [
             exl3.text(value.get(name))
             for name in ("api_key_file", "maintenance_directory", "output_directory")
         ]
-        require(
-            all(
-                all(ord(char) >= 32 and ord(char) != 127 for char in value)
-                for value in values
-            ),
-            "Invalid input path",
-        )
+        if not all(
+            all(ord(char) >= FIRST_PRINTABLE and ord(char) != DELETE for char in value)
+            for value in values
+        ):
+            msg = "Invalid input path"
+            raise ValueError(msg)
         paths = [Path(value) for value in values]
-        require(
-            all(
-                path.is_absolute() and str(path) == value
-                for path, value in zip(paths, values)
-            ),
-            "Input paths must be canonical and absolute",
-        )
-        require(paths[0].resolve(strict=True) == paths[0], "Key path must be canonical")
-        require(
-            paths[2].parent.resolve(strict=True) == paths[2].parent,
-            "Output parent must already exist and be canonical",
-        )
-        require(
-            paths[2].resolve(strict=False) == paths[2],
-            "Output path must be canonical",
-        )
+        if not all(
+            path.is_absolute() and str(path) == value
+            for path, value in zip(paths, values, strict=True)
+        ):
+            msg = "Input paths must be canonical and absolute"
+            raise ValueError(msg)
+        if paths[0].resolve(strict=True) != paths[0]:
+            msg = "Key path must be canonical"
+            raise ValueError(msg)
+        if paths[2].parent.resolve(strict=True) != paths[2].parent:
+            msg = "Output parent must already exist and be canonical"
+            raise ValueError(msg)
+        if paths[2].resolve(strict=False) != paths[2]:
+            msg = "Output path must be canonical"
+            raise ValueError(msg)
         _ = api_key(paths[0])
         return cls(
             container,
@@ -209,77 +280,126 @@ class Settings:
         )
 
 
-def guard(settings: Settings) -> dict[str, object]:
-    """Verify existing guardian ownership without acquiring or changing its locks."""
-    require(
-        os.getuid() == os.geteuid() == 1000, "Guardian contract requires owner uid1000"
-    )
-    require(OPERATOR.resolve(strict=True) == OPERATOR, "Operator path is not canonical")
+def _check_operator(settings: Settings) -> None:
+    """Require the guardian owner and the unchanged operator descriptor.
+
+    Args:
+        settings: The operator settings loaded at startup.
+
+    Raises:
+        ValueError: If the owner or the descriptor differs.
+
+    """
+    if not (os.getuid() == os.geteuid() == OWNER_UID):
+        msg = "Guardian contract requires owner uid1000"
+        raise ValueError(msg)
+    if OPERATOR.resolve(strict=True) != OPERATOR:
+        msg = "Operator path is not canonical"
+        raise ValueError(msg)
     operator_raw, operator_identity = private_read(OPERATOR)
-    require(
+    if not (
         operator_identity == settings.operator_identity
-        and operator_raw == settings.operator_raw,
-        "Operator descriptor changed during benchmark",
-    )
+        and operator_raw == settings.operator_raw
+    ):
+        msg = "Operator descriptor changed during benchmark"
+        raise ValueError(msg)
+
+
+def _maintenance_state(settings: Settings) -> dict[str, object]:
+    """Load the guardian status and require it armed on this candidate.
+
+    Args:
+        settings: The operator settings.
+
+    Returns:
+        The guardian's maintenance status.
+
+    Raises:
+        ValueError: If the window is not armed on this candidate and boot.
+
+    """
     directory = private_directory(settings.maintenance)
     raw, _ = private_read(settings.maintenance / "status.json")
     state = mapping(exl3.loads(raw))
     _ = exl3.canonical(state)
-    require(
+    if not (
         state.get("schema") == 1
         and state.get("state") == "armed"
-        and state.get("phase") == "candidate_started",
-        "Maintenance window is not armed on candidate",
-    )
-    require(
-        state.get("directory_identity") == directory,
-        "Maintenance directory identity changed",
-    )
-    require(
+        and state.get("phase") == "candidate_started"
+    ):
+        msg = "Maintenance window is not armed on candidate"
+        raise ValueError(msg)
+    if state.get("directory_identity") != directory:
+        msg = "Maintenance directory identity changed"
+        raise ValueError(msg)
+    if (
         state.get("boot_id")
-        == Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
-        "Foreign maintenance boot",
-    )
-    require(
-        not os.path.lexists(settings.maintenance / "control.json"),
-        "Recovery/promotion already queued",
-    )
+        != Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    ):
+        msg = "Foreign maintenance boot"
+        raise ValueError(msg)
+    if os.path.lexists(settings.maintenance / "control.json"):
+        msg = "Recovery/promotion already queued"
+        raise ValueError(msg)
     candidate = mapping(state.get("candidate"))
-    require(
-        candidate.get("id") == settings.container,
-        "Candidate is not owned by this guardian",
-    )
-    require(state.get("lease_path") == str(LEASE), "Unexpected guardian lease")
+    if candidate.get("id") != settings.container:
+        msg = "Candidate is not owned by this guardian"
+        raise ValueError(msg)
+    if state.get("lease_path") != str(LEASE):
+        msg = "Unexpected guardian lease"
+        raise ValueError(msg)
+    return state
+
+
+def _lease_identity(settings: Settings, state: dict[str, object]) -> dict[str, int]:
+    """Require the lease, launch lock and operation mutex the guardian recorded.
+
+    Args:
+        settings: The operator settings.
+        state: The guardian's maintenance status.
+
+    Returns:
+        The maintenance lease identity.
+
+    Raises:
+        ValueError: If any lock identity changed.
+
+    """
     _, lease_identity = private_read(LEASE)
     _, launch_identity = private_read(LAUNCH_LOCK)
     _, mutex_identity = private_read(settings.maintenance / "operation.lock")
-    require(
+    if not (
         lease_identity == state.get("lease_identity")
         and launch_identity == state.get("launch_lock_identity") == LAUNCH_IDENTITY
-        and mutex_identity == state.get("operation_mutex_identity"),
-        "Maintenance lock identity changed",
-    )
-    pid = exl3.integer(state.get("guardian_pid"))
-    require(
-        pid > 1 and process_start(pid) == state.get("guardian_start"),
-        "Guardian process changed",
-    )
-    require(
-        (Path("/proc") / str(pid)).stat().st_uid == os.getuid(),
-        "Foreign guardian owner",
-    )
-    # flock ownership is read from the kernel, not inferred from an unlocked file.
+        and mutex_identity == state.get("operation_mutex_identity")
+    ):
+        msg = "Maintenance lock identity changed"
+        raise ValueError(msg)
+    return lease_identity
+
+
+def _holds_lease(pid: int, lease_identity: dict[str, int]) -> bool:
+    """Read flock ownership from the kernel, not from an unlocked file.
+
+    Args:
+        pid: The guardian PID.
+        lease_identity: The maintenance lease identity.
+
+    Returns:
+        Whether the guardian holds a write flock on the lease inode.
+
+    """
     held = False
-    for row in Path("/proc/locks").read_text().splitlines():
+    for row in Path("/proc/locks").read_text(encoding="utf-8").splitlines():
         fields = row.split()
         if (
-            len(fields) < 6
+            len(fields) < LOCK_ROW_FIELDS
             or fields[1:4] != ["FLOCK", "ADVISORY", "WRITE"]
             or fields[4] != str(pid)
         ):
             continue
         device = fields[5].split(":")
-        if len(device) == 3 and (
+        if len(device) == LOCK_DEVICE_PARTS and (
             int(device[0], 16),
             int(device[1], 16),
             int(device[2]),
@@ -289,17 +409,63 @@ def guard(settings: Settings) -> dict[str, object]:
             lease_identity["ino"],
         ):
             held = True
-    require(held, "Guardian does not hold the maintenance lease")
-    require(
+    return held
+
+
+def _check_guardian(state: dict[str, object], lease_identity: dict[str, int]) -> None:
+    """Require the recorded live guardian process to hold the lease.
+
+    Args:
+        state: The guardian's maintenance status.
+        lease_identity: The maintenance lease identity.
+
+    Raises:
+        ValueError: If the guardian process changed or does not hold the lease.
+
+    """
+    pid = exl3.integer(state.get("guardian_pid"))
+    if not (pid > 1 and process_start(pid) == state.get("guardian_start")):
+        msg = "Guardian process changed"
+        raise ValueError(msg)
+    if (Path("/proc") / str(pid)).stat().st_uid != os.getuid():
+        msg = "Foreign guardian owner"
+        raise ValueError(msg)
+    if not _holds_lease(pid, lease_identity):
+        msg = "Guardian does not hold the maintenance lease"
+        raise ValueError(msg)
+
+
+def guard(settings: Settings) -> dict[str, object]:
+    """Verify existing guardian ownership without acquiring or changing its locks.
+
+    Returns:
+        The guardian's armed maintenance status.
+
+    Raises:
+        ValueError: If too little recovery headroom remains.
+
+    """
+    _check_operator(settings)
+    state = _maintenance_state(settings)
+    lease_identity = _lease_identity(settings, state)
+    _check_guardian(state, lease_identity)
+    if not (
         number(state.get("deadline_monotonic")) - time.monotonic()
-        > RECOVERY_HEADROOM_SECONDS,
-        "Insufficient recovery headroom",
-    )
+        > RECOVERY_HEADROOM_SECONDS
+    ):
+        msg = "Insufficient recovery headroom"
+        raise ValueError(msg)
     return state
 
 
 def verify_container(settings: Settings, state: dict[str, object]) -> None:
-    """Check only public Docker identity fields before authenticated API probes."""
+    """Check only public Docker identity fields before authenticated API probes.
+
+    Raises:
+        ValueError: If the instance is not the guardian's exclusively published
+            candidate.
+
+    """
     template = (
         '{"id":{{json .Id}},"image":{{json .Image}},"name":{{json .Name}},'
         '"running":{{json .State.Running}},"ports":{{json .NetworkSettings.Ports}},'
@@ -317,19 +483,18 @@ def verify_container(settings: Settings, state: dict[str, object]) -> None:
         )
     )
     candidate = mapping(state.get("candidate"))
-    require(
+    if not (
         all(value.get(key) == candidate.get(key) for key in ("id", "image", "name"))
         and value.get("running") is True
-        and value.get("network") != "host",
-        "Owned serving instance differs from guardian candidate",
-    )
-    require(
-        mapping(value.get("ports")).get("18020/tcp")
-        == [
-            {"HostIp": "127.0.0.1", "HostPort": "18020"},
-        ],
-        "Owned candidate must exclusively publish the fixed loopback endpoint",
-    )
+        and value.get("network") != "host"
+    ):
+        msg = "Owned serving instance differs from guardian candidate"
+        raise ValueError(msg)
+    if mapping(value.get("ports")).get("18020/tcp") != [
+        {"HostIp": "127.0.0.1", "HostPort": "18020"}
+    ]:
+        msg = "Owned candidate must exclusively publish the fixed loopback endpoint"
+        raise ValueError(msg)
 
 
 def run_producer(
@@ -339,13 +504,18 @@ def run_producer(
     cwd: Path,
     env: dict[str, str],
 ) -> None:
-    """Run once, preserving private native output; no retries or score selection."""
+    """Run once, preserving private native output; no retries or score selection.
+
+    Raises:
+        ValueError: If the native command exits nonzero.
+
+    """
     guard(settings)
     with (
         (settings.output / "logs" / f"{name}.stdout").open("xb") as stdout,
         (settings.output / "logs" / f"{name}.stderr").open("xb") as stderr,
     ):
-        result = subprocess.run(
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: fixed native eval producer command built by this module, no shell
             command,
             cwd=cwd,
             env=env,
@@ -358,11 +528,125 @@ def run_producer(
         settings.output / name / "provenance/producer-exit.json",
         {"returncode": result.returncode},
     )
-    require(
-        result.returncode == 0,
-        f"Native {name} command failed; retained artifacts are incomplete",
-    )
+    if result.returncode != 0:
+        msg = f"Native {name} command failed; retained artifacts are incomplete"
+        raise ValueError(msg)
     guard(settings)
+
+
+def _call_observation(
+    value: object,
+    ordinal: int,
+    index: int,
+    task: dict[str, object],
+    trace: dict[str, object],
+) -> tuple[dict[str, object], int, int, float]:
+    """Validate one native model call of one episode trace.
+
+    Args:
+        value: The raw model-call record.
+        ordinal: The episode's line number in the trace file.
+        index: The call's position in the trace.
+        task: The episode's task record.
+        trace: The episode's single trace.
+
+    Returns:
+        The call observation, its completion tokens, its input tokens and its
+        wall duration in seconds.
+
+    Raises:
+        ValueError: If the call failed, did not finish or has invalid usage or
+            clocks.
+
+    """
+    call = mapping(value)
+    # Native write_episode(exclude_none=True) omits a successful error.
+    if call.get("error") is not None:
+        msg = "Failed or incomplete model call; no filtering or retries"
+        raise ValueError(msg)
+    finish = call.get("finish_reason")
+    if not (isinstance(finish, str) and finish in {"stop", "length"}):
+        msg = "Incomplete native model-call finish"
+        raise ValueError(msg)
+    usage = mapping(call.get("usage"))
+    tokens = exl3.integer(usage.get("completion_tokens"))
+    if not (tokens >= 0):
+        msg = "Negative model-call completion usage"
+        raise ValueError(msg)
+    prompt_tokens = exl3.integer(usage.get("prompt_tokens"))
+    cached_value = usage.get("cached_input_tokens")
+    cached_tokens = 0 if cached_value is None else exl3.integer(cached_value)
+    if not (prompt_tokens >= 0 and cached_tokens >= 0):
+        msg = "Negative native prompt/cache usage"
+        raise ValueError(msg)
+    input_tokens = prompt_tokens + cached_tokens
+    reasoning = usage.get("reasoning_tokens")
+    if reasoning is not None and not (0 <= exl3.integer(reasoning) <= tokens):
+        msg = "Reasoning usage must be a subset, never additional tokens"
+        raise ValueError(msg)
+    span = mapping(call.get("time"))
+    start, end = number(span.get("start")), number(span.get("end"))
+    duration = number(end - start)
+    if not (0 < start < end and duration > 0):
+        msg = "Missing, nonfinite or reversed native model-call wall clocks"
+        raise ValueError(msg)
+    observation: dict[str, object] = {
+        "episode": ordinal,
+        "task_key": exl3.text(task.get("key")),
+        "task_sha256": exl3.text(task.get("hash")),
+        "trace_id": trace.get("id"),
+        "call": index,
+        "completion_tokens": tokens,
+        "input_tokens": input_tokens,
+        "uncached_prompt_tokens": prompt_tokens,
+        "cached_input_tokens": cached_value,
+        "reasoning_tokens_subset": reasoning,
+        "start_unix_seconds": start,
+        "end_unix_seconds": end,
+        "duration_wall_seconds": duration,
+        "finish_reason": call["finish_reason"],
+    }
+    return observation, tokens, input_tokens, duration
+
+
+def _episode_observations(
+    raw: bytes, ordinal: int
+) -> list[tuple[dict[str, object], int, int, float]]:
+    """Validate one native episode line and every model call of its trace.
+
+    Args:
+        raw: One JSON line of the native trace file.
+        ordinal: The line number of the episode.
+
+    Returns:
+        Each call's observation, completion tokens, input tokens and duration.
+
+    Raises:
+        ValueError: If the episode or its single trace failed or has no calls.
+
+    """
+    episode_value: object = json.loads(raw, object_pairs_hook=exl3.pairs)
+    episode = mapping(episode_value)
+    task = mapping(episode.get("task"))
+    if not (episode.get("ok") is True and not sequence(episode.get("errors"))):
+        msg = "Model-call metric cannot exclude an operationally failed episode"
+        raise ValueError(msg)
+    traces = sequence(episode.get("traces"))
+    if len(traces) != 1:
+        msg = "Expected the native single-agent trace"
+        raise ValueError(msg)
+    trace = mapping(traces[0])
+    if not (trace.get("ok") is True and not sequence(trace.get("errors"))):
+        msg = "Model-call metric cannot exclude a failed native trace"
+        raise ValueError(msg)
+    calls = sequence(trace.get("calls"))
+    if not bool(calls):
+        msg = "Missing native model-call observations"
+        raise ValueError(msg)
+    return [
+        _call_observation(value, ordinal, index, task, trace)
+        for index, value in enumerate(calls)
+    ]
 
 
 def model_call_observations(
@@ -375,13 +659,21 @@ def model_call_observations(
     Verifiers ModelCall.time is Unix wall time from request send through fully
     received response. Usage.completion_tokens already includes reasoning tokens.
     This is whole-model-call throughput, not SSE committed-decode/GPU timing.
+
+    Returns:
+        The pooled throughput, totals, every call observation and their scope.
+
+    Raises:
+        ValueError: If the trace file, episode count or durations are invalid.
+
     """
-    require(
-        type(expected_episode_count) is int and expected_episode_count > 0,
-        "Expected a positive exact native episode count",
-    )
+    if not (type(expected_episode_count) is int and expected_episode_count > 0):
+        msg = "Expected a positive exact native episode count"
+        raise ValueError(msg)
     paths = list(directory.glob("*/traces.jsonl"))
-    require(len(paths) == 1, "Missing unique native trace file")
+    if len(paths) != 1:
+        msg = "Missing unique native trace file"
+        raise ValueError(msg)
     path = evidence.retain(paths[0])
     observations: list[dict[str, object]] = []
     durations: list[float] = []
@@ -390,85 +682,21 @@ def model_call_observations(
     episodes = 0
     with path.open("rb") as stream:
         for ordinal, raw in enumerate(stream):
-            episode_value: object = json.loads(raw, object_pairs_hook=exl3.pairs)
-            episode = mapping(episode_value)
-            task = mapping(episode.get("task"))
-            require(
-                episode.get("ok") is True and not sequence(episode.get("errors")),
-                "Model-call metric cannot exclude an operationally failed episode",
-            )
-            traces = sequence(episode.get("traces"))
-            require(len(traces) == 1, "Expected the native single-agent trace")
-            trace = mapping(traces[0])
-            require(
-                trace.get("ok") is True and not sequence(trace.get("errors")),
-                "Model-call metric cannot exclude a failed native trace",
-            )
-            calls = sequence(trace.get("calls"))
-            require(bool(calls), "Missing native model-call observations")
-            for index, value in enumerate(calls):
-                call = mapping(value)
-                # Native write_episode(exclude_none=True) omits a successful error.
-                require(
-                    call.get("error") is None,
-                    "Failed or incomplete model call; no filtering or retries",
-                )
-                require(
-                    call.get("finish_reason") in ("stop", "length"),
-                    "Incomplete native model-call finish",
-                )
-                usage = mapping(call.get("usage"))
-                tokens = exl3.integer(usage.get("completion_tokens"))
-                require(tokens >= 0, "Negative model-call completion usage")
-                prompt_tokens = exl3.integer(usage.get("prompt_tokens"))
-                cached_value = usage.get("cached_input_tokens")
-                cached_tokens = (
-                    0 if cached_value is None else exl3.integer(cached_value)
-                )
-                require(
-                    prompt_tokens >= 0 and cached_tokens >= 0,
-                    "Negative native prompt/cache usage",
-                )
-                input_tokens = prompt_tokens + cached_tokens
-                reasoning = usage.get("reasoning_tokens")
-                if reasoning is not None:
-                    require(
-                        0 <= exl3.integer(reasoning) <= tokens,
-                        "Reasoning usage must be a subset, never additional tokens",
-                    )
-                span = mapping(call.get("time"))
-                start, end = number(span.get("start")), number(span.get("end"))
-                duration = number(end - start)
-                require(
-                    0 < start < end and duration > 0,
-                    "Missing, nonfinite or reversed native model-call wall clocks",
-                )
+            for observation, tokens, input_tokens, duration in _episode_observations(
+                raw, ordinal
+            ):
                 total_tokens += tokens
                 total_input_tokens += input_tokens
                 durations.append(duration)
-                observations.append({
-                    "episode": ordinal,
-                    "task_key": exl3.text(task.get("key")),
-                    "task_sha256": exl3.text(task.get("hash")),
-                    "trace_id": trace.get("id"),
-                    "call": index,
-                    "completion_tokens": tokens,
-                    "input_tokens": input_tokens,
-                    "uncached_prompt_tokens": prompt_tokens,
-                    "cached_input_tokens": cached_value,
-                    "reasoning_tokens_subset": reasoning,
-                    "start_unix_seconds": start,
-                    "end_unix_seconds": end,
-                    "duration_wall_seconds": duration,
-                    "finish_reason": call["finish_reason"],
-                })
+                observations.append(observation)
             episodes += 1
-    require(
-        episodes == expected_episode_count,
-        f"Model-call metric requires all {expected_episode_count} native episodes",
-    )
+    if episodes != expected_episode_count:
+        msg = f"Model-call metric requires all {expected_episode_count} native episodes"
+        raise ValueError(msg)
     seconds = number(math.fsum(durations))
-    require(seconds > 0, "No positive native model-call duration")
+    if not (seconds > 0):
+        msg = "No positive native model-call duration"
+        raise ValueError(msg)
     return {
         "model_call_output_tok_s": number(total_tokens / seconds),
         "completion_tokens": total_tokens,
@@ -480,10 +708,23 @@ def model_call_observations(
             call["finish_reason"] == "length" for call in observations
         ),
         "calls": observations,
-        "scope": "whole native model-call wall time including prefill/decode/HTTP; not decode-only, monotonic or GPU time",
-        "usage_semantics": "completion_tokens includes reasoning; optional reasoning_tokens is not added again",
-        "input_usage_semantics": "native prompt_tokens excludes cache reads; input_tokens adds reported cached_input_tokens back, without claiming omitted cache telemetry is zero",
-        "clock": "native Unix wall seconds, unmodified; positive finite end minus start per call",
+        "scope": (
+            "whole native model-call wall time including prefill/decode/HTTP; "
+            "not decode-only, monotonic or GPU time"
+        ),
+        "usage_semantics": (
+            "completion_tokens includes reasoning; "
+            "optional reasoning_tokens is not added again"
+        ),
+        "input_usage_semantics": (
+            "native prompt_tokens excludes cache reads; input_tokens adds reported "
+            "cached_input_tokens back, without claiming omitted cache telemetry "
+            "is zero"
+        ),
+        "clock": (
+            "native Unix wall seconds, unmodified; "
+            "positive finite end minus start per call"
+        ),
     }
 
 
@@ -511,7 +752,7 @@ class Suite:
     sources: tuple[str, ...]
     record: dict[str, object]
     trees: tuple[str, ...]
-    freeze: Callable[[Settings, exl3.Client, exl3.RawTokenizer], dict[str, object]]
+    freeze: Callable[[Settings, exl3.Client, RawTokenizer], dict[str, object]]
     collect: Callable[[Settings, exl3.Client], None]
     admit: Callable[
         [Settings, exl3.Evidence, dict[str, object], Window],
@@ -520,9 +761,14 @@ class Suite:
 
 
 def _broad_freeze(
-    settings: Settings, client: exl3.Client, tokenizer: exl3.RawTokenizer
+    settings: Settings, client: exl3.Client, tokenizer: RawTokenizer
 ) -> dict[str, object]:
-    """Bind taskset inputs and C1 prompts/IDs before any generation."""
+    """Bind taskset inputs and C1 prompts/IDs before any generation.
+
+    Returns:
+        The frozen taskset inputs and the C1 plan binding.
+
+    """
     tasksets: dict[str, object] = {}
     for taskset in exl3.TASKSETS:
         inputs = exl3.freeze_taskset(settings.output / taskset.name, taskset)
@@ -575,7 +821,16 @@ def _broad_admit(
     frozen_workload: dict[str, object],
     window: Window,
 ) -> tuple[Metrics, dict[str, object]]:
-    """Replay every taskset, the pooled primary and C1 from raw evidence."""
+    """Replay every taskset, the pooled primary and C1 from raw evidence.
+
+    Returns:
+        The admitted metrics and the suite's admitted.json fields.
+
+    Raises:
+        ValueError: If a taskset lost rollouts, its inputs or the C1 plan changed,
+            or no positive pooled duration remains.
+
+    """
     frozen_tasksets = mapping(frozen_workload["tasksets"])
     qualities: dict[str, object] = {}
     native_calls: dict[str, object] = {}
@@ -586,19 +841,24 @@ def _broad_admit(
         group = settings.output / taskset.name
         quality = exl3.admit_taskset(evidence, group, taskset, window)
         calls = model_call_observations(evidence, group / taskset.name, taskset.tasks)
-        require(
+        if not (
             calls["call_count"] == taskset.tasks
             and quality["rollouts"] == taskset.tasks
-            and calls["length_truncated_calls"] == quality["truncated_rollouts"],
-            f"{taskset.name} must retain all {taskset.tasks} graded one-call rollouts",
-        )
-        require(
+            and calls["length_truncated_calls"] == quality["truncated_rollouts"]
+        ):
+            msg = (
+                f"{taskset.name} must retain all {taskset.tasks} "
+                "graded one-call rollouts"
+            )
+            raise ValueError(msg)
+        if (
             mapping(frozen_tasksets[taskset.name])["files_sha256"]
-            == exl3.document(
+            != exl3.document(
                 group / f"provenance/{taskset.name}.evaluation-inputs-before.json"
-            )["files_sha256"],
-            f"{taskset.name} inputs differ from the pre-suite frozen workload",
-        )
+            )["files_sha256"]
+        ):
+            msg = f"{taskset.name} inputs differ from the pre-suite frozen workload"
+            raise ValueError(msg)
         metrics[f"{taskset.metric}_output_tok_s"] = number(
             calls["model_call_output_tok_s"]
         )
@@ -614,7 +874,9 @@ def _broad_admit(
         qualities[taskset.name] = quality
         native_calls[taskset.name] = calls
     pooled_seconds = number(math.fsum(pooled_durations))
-    require(pooled_seconds > 0, "No positive pooled native model-call duration")
+    if not (pooled_seconds > 0):
+        msg = "No positive pooled native model-call duration"
+        raise ValueError(msg)
     metrics["model_call_output_tok_s"] = number(pooled_tokens / pooled_seconds)
     native_calls["pooled"] = {
         "model_call_output_tok_s": metrics["model_call_output_tok_s"],
@@ -622,20 +884,23 @@ def _broad_admit(
         "model_call_wall_seconds": pooled_seconds,
         "call_count": len(pooled_durations),
         "tasksets": [taskset.name for taskset in exl3.TASKSETS],
-        "scope": "every native model call of all four tasksets pooled: sum of completion tokens / sum of model-call wall time",
+        "scope": POOLED_SCOPE,
     }
     c1 = exl3.admit_c1(evidence, settings.output / "c1")
-    require(
-        mapping(frozen_workload["c1"])["plan_sha256"]
-        == exl3.digest(settings.output / "c1/plan.json"),
-        "C1 plan differs from the pre-suite frozen workload",
-    )
+    if mapping(frozen_workload["c1"])["plan_sha256"] != exl3.digest(
+        settings.output / "c1/plan.json"
+    ):
+        msg = "C1 plan differs from the pre-suite frozen workload"
+        raise ValueError(msg)
     guard(settings)
     metrics.update({
         name: number(value) for name, value in mapping(c1["metrics"]).items()
     })
     return metrics, {
-        "quality_scope": "sampled native tasksets (3 AIME25, 20 MMLU-Pro, 6 I3 Logic, 3 LiveCodeBench); native rewards per taskset, no combined quality score",
+        "quality_scope": (
+            "sampled native tasksets (3 AIME25, 20 MMLU-Pro, 6 I3 Logic, "
+            "3 LiveCodeBench); native rewards per taskset, no combined quality score"
+        ),
         "tasksets": qualities,
         "native_model_calls": native_calls,
         "c1": c1,
@@ -643,15 +908,23 @@ def _broad_admit(
             "ttft": c1["ttft"],
             "committed_decode_tps": c1["committed_decode_tps"],
             "power_energy": "not sampled by this lane",
-            "context_capacity": "/v1/models max_model_len is the reported limit, not a 262144-token capacity test",
+            "context_capacity": (
+                "/v1/models max_model_len is the reported limit, "
+                "not a 262144-token capacity test"
+            ),
         },
     }
 
 
 def _prefill_freeze(
-    settings: Settings, client: exl3.Client, tokenizer: exl3.RawTokenizer
+    settings: Settings, client: exl3.Client, tokenizer: RawTokenizer
 ) -> dict[str, object]:
-    """Size, freeze and render every ladder row before any generation."""
+    """Size, freeze and render every ladder row before any generation.
+
+    Returns:
+        The prefill plan binding.
+
+    """
     plan = prefill.plan(settings.output / "prefill", client, tokenizer, prefill.LADDER)
     return {
         "prefill": {
@@ -677,23 +950,30 @@ def _prefill_admit(
     frozen_workload: dict[str, object],
     window: Window,
 ) -> tuple[Metrics, dict[str, object]]:
-    """Replay every ladder row from raw evidence inside the identity window."""
+    """Replay every ladder row from raw evidence inside the identity window.
+
+    Returns:
+        The admitted metrics and the suite's admitted.json fields.
+
+    Raises:
+        ValueError: If the plan changed or a request falls outside the window.
+
+    """
     result = prefill.admit(evidence, settings.output / "prefill", prefill.LADDER)
-    require(
-        mapping(frozen_workload["prefill"])["plan_sha256"]
-        == exl3.digest(settings.output / "prefill/plan.json"),
-        "Prefill plan differs from the pre-suite frozen workload",
-    )
-    require(
-        all(
-            window[0]
-            < exl3.integer(mapping(mapping(row)[kind])["request_started_unix_ns"])
-            < window[1]
-            for row in sequence(result["rows"])
-            for kind in prefill.BUDGETS
-        ),
-        "Prefill requests fall outside the identity capture window",
-    )
+    if mapping(frozen_workload["prefill"])["plan_sha256"] != exl3.digest(
+        settings.output / "prefill/plan.json"
+    ):
+        msg = "Prefill plan differs from the pre-suite frozen workload"
+        raise ValueError(msg)
+    if not all(
+        window[0]
+        < exl3.integer(mapping(mapping(row)[kind])["request_started_unix_ns"])
+        < window[1]
+        for row in sequence(result["rows"])
+        for kind in prefill.BUDGETS
+    ):
+        msg = "Prefill requests fall outside the identity capture window"
+        raise ValueError(msg)
     guard(settings)
     metrics = {
         name: number(value) for name, value in mapping(result["metrics"]).items()
@@ -702,8 +982,13 @@ def _prefill_admit(
         "prefill": result,
         "not_measured": {
             "streaming_ttft": prefill.TTFT_SCOPE,
-            "committed_decode_tps": "unavailable: EXL3 exposes no incremental committed counters",
-            "prefix_reuse": "the continuation is expected to reuse the TTFT prefix; usage carries no cache telemetry, so reuse is not observed",
+            "committed_decode_tps": (
+                "unavailable: EXL3 exposes no incremental committed counters"
+            ),
+            "prefix_reuse": (
+                "the continuation is expected to reuse the TTFT prefix; usage "
+                "carries no cache telemetry, so reuse is not observed"
+            ),
             "quality": "this suite measures no task quality or reward",
             "power_energy": "not sampled by this lane",
         },
@@ -716,7 +1001,7 @@ BROAD = Suite(
     scope="exl3_bend_sampled_broad_tasksets_and_c1_whole_request_not_full_qualification",
     order=(*(taskset.name for taskset in exl3.TASKSETS), "c1"),
     primary_metric="model_call_output_tok_s",
-    primary_scope="every native model call of all four tasksets pooled: sum of completion tokens / sum of model-call wall time",
+    primary_scope=POOLED_SCOPE,
     metric_names=(
         "model_call_output_tok_s",
         *(
@@ -744,7 +1029,10 @@ BROAD = Suite(
                 "shuffle": True,
                 "seed": 0,
                 "output_budget": taskset.output_tokens,
-                "sampling": "eval/configs/local.toml; greedy, thinking enabled; only max_tokens set per taskset",
+                "sampling": (
+                    "eval/configs/local.toml; greedy, thinking enabled; "
+                    "only max_tokens set per taskset"
+                ),
             }
             for taskset in exl3.TASKSETS
         ],
@@ -807,27 +1095,60 @@ PREFILL = Suite(
 SUITES = {suite.name: suite for suite in (BROAD, PREFILL)}
 
 
-def worker(settings: Settings, suite: Suite) -> int:
-    """Collect the frozen workload once, then replay raw-evidence admission."""
-    state = guard(settings)
-    verify_container(settings, state)
-    candidate = mapping(state.get("candidate"))
-    client = exl3.Client(api_key(settings.key_file))
-    before_path = settings.output / "identity-before.json"
-    after_path = settings.output / "identity-after.json"
-    before = exl3.capture_file(settings.container, client, before_path, None)
-    identity = mapping(before["identity"])
+def _identity_tokenizer(
+    settings: Settings, identity: dict[str, object], candidate: dict[str, object]
+) -> RawTokenizer:
+    """Check the captured instance against the candidate and load its tokenizer.
+
+    Args:
+        settings: The operator settings.
+        identity: The before-capture serving identity.
+        candidate: The guardian's candidate record.
+
+    Returns:
+        The captured serving tokenizer.
+
+    Raises:
+        ValueError: If the capture selected another container or image.
+
+    """
     instance = mapping(identity["container"])
-    require(
+    if not (
         instance.get("id") == settings.container
-        and instance.get("image") == candidate.get("image"),
-        "Captured identity selected another container or image",
-    )
+        and instance.get("image") == candidate.get("image")
+    ):
+        msg = "Captured identity selected another container or image"
+        raise ValueError(msg)
     tokenizer_record = mapping(identity["tokenizer"])
-    tokenizer = exl3.RawTokenizer(
+    return RawTokenizer(
         Path(exl3.text(tokenizer_record["host_path"])),
         exl3.text(tokenizer_record["sha256"]),
     )
+
+
+def _freeze_workload(
+    settings: Settings,
+    suite: Suite,
+    client: exl3.Client,
+    tokenizer: RawTokenizer,
+    before_path: Path,
+) -> tuple[dict[str, object], str, list[object]]:
+    """Freeze the suite inputs, recheck the sources and save benchmark.json.
+
+    Args:
+        settings: The operator settings.
+        suite: The selected suite.
+        client: The endpoint client.
+        tokenizer: The captured serving tokenizer.
+        before_path: The before-capture identity file.
+
+    Returns:
+        The frozen workload, its SHA-256 and the snapshotted source records.
+
+    Raises:
+        ValueError: If a source changed after its initial snapshot.
+
+    """
     identity_sha256 = exl3.digest(before_path)
     supervisor = exl3.document(settings.output / "supervisor.json")
     fields = suite.freeze(settings, client, tokenizer)
@@ -835,10 +1156,9 @@ def worker(settings: Settings, suite: Suite) -> int:
     for value in sources:
         item = mapping(value)
         name = exl3.text(item["path"]).removeprefix("sources/")
-        require(
-            item.get("sha256") == exl3.digest(ROOT / name),
-            f"Benchmark source changed after its initial snapshot: {name}",
-        )
+        if item.get("sha256") != exl3.digest(ROOT / name):
+            msg = f"Benchmark source changed after its initial snapshot: {name}"
+            raise ValueError(msg)
     workload: dict[str, object] = {
         "protocol": suite.protocol,
         "order": list(suite.order),
@@ -848,30 +1168,78 @@ def worker(settings: Settings, suite: Suite) -> int:
         **fields,
         "sources": sources,
     }
+    workload_sha256 = hashlib.sha256(exl3.canonical(workload)).hexdigest()
     benchmark = {
         **supervisor,
         "workload": workload,
-        "workload_sha256": hashlib.sha256(exl3.canonical(workload)).hexdigest(),
+        "workload_sha256": workload_sha256,
     }
     exl3.save(settings.output / "benchmark.json", benchmark)
-    suite.collect(settings, client)
+    return workload, workload_sha256, sources
+
+
+def _capture_after(
+    settings: Settings,
+    client: exl3.Client,
+    before: dict[str, object],
+    identity: dict[str, object],
+    before_path: Path,
+) -> tuple[exl3.Evidence, Window]:
+    """Capture the after-identity and open the evidence closure.
+
+    Args:
+        settings: The operator settings.
+        client: The endpoint client.
+        before: The before-capture envelope.
+        identity: The before-capture serving identity.
+        before_path: The before-capture identity file.
+
+    Returns:
+        The evidence closure holding both captures and the identity window.
+
+    Raises:
+        ValueError: If the measurement changed the serving instance.
+
+    """
+    after_path = settings.output / "identity-after.json"
     after = exl3.capture_file(settings.container, client, after_path, before_path)
     evidence = exl3.Evidence(settings.output / "admitted.json")
     for path in (before_path, after_path):
         evidence.retain(path)
-    require(after["identity"] == identity, "Measurement changed serving instance")
+    if after["identity"] != identity:
+        msg = "Measurement changed serving instance"
+        raise ValueError(msg)
     window = (
         exl3.integer(before["finished_unix_ns"]),
         exl3.integer(after["started_unix_ns"]),
     )
-    metrics, admitted = suite.admit(settings, evidence, workload, window)
+    return evidence, window
+
+
+def _retain_evidence(
+    settings: Settings,
+    suite: Suite,
+    evidence: exl3.Evidence,
+    sources: list[object],
+) -> None:
+    """Retain the snapshotted sources, run records, logs and suite trees.
+
+    Args:
+        settings: The operator settings.
+        suite: The selected suite.
+        evidence: The evidence closure.
+        sources: The snapshotted source records.
+
+    Raises:
+        ValueError: If a snapshotted source changed.
+
+    """
     for value in sources:
         item = mapping(value)
         path = settings.output / exl3.text(item["path"])
-        require(
-            exl3.digest(evidence.retain(path)) == item["sha256"],
-            f"Snapshotted source changed: {path}",
-        )
+        if exl3.digest(evidence.retain(path)) != item["sha256"]:
+            msg = f"Snapshotted source changed: {path}"
+            raise ValueError(msg)
     for path in (
         settings.output / "benchmark.json",
         settings.output / "supervisor.json",
@@ -881,6 +1249,30 @@ def worker(settings: Settings, suite: Suite) -> int:
     evidence.tree(settings.output / "logs")
     for tree in suite.trees:
         evidence.tree(settings.output / tree)
+
+
+def worker(settings: Settings, suite: Suite) -> int:
+    """Collect the frozen workload once, then replay raw-evidence admission.
+
+    Returns:
+        Zero once admitted.json is written.
+
+    """
+    state = guard(settings)
+    verify_container(settings, state)
+    candidate = mapping(state.get("candidate"))
+    client = exl3.Client(api_key(settings.key_file))
+    before_path = settings.output / "identity-before.json"
+    before = exl3.capture_file(settings.container, client, before_path, None)
+    identity = mapping(before["identity"])
+    tokenizer = _identity_tokenizer(settings, identity, candidate)
+    workload, workload_sha256, sources = _freeze_workload(
+        settings, suite, client, tokenizer, before_path
+    )
+    suite.collect(settings, client)
+    evidence, window = _capture_after(settings, client, before, identity, before_path)
+    metrics, admitted = suite.admit(settings, evidence, workload, window)
+    _retain_evidence(settings, suite, evidence, sources)
     exl3.save(
         settings.output / "admitted.json",
         {
@@ -889,7 +1281,7 @@ def worker(settings: Settings, suite: Suite) -> int:
             "protocol": suite.protocol,
             "scope": suite.scope,
             "order": list(suite.order),
-            "workload_sha256": benchmark["workload_sha256"],
+            "workload_sha256": workload_sha256,
             "benchmark_sha256": exl3.digest(settings.output / "benchmark.json"),
             "identity": identity,
             "metrics": metrics,
@@ -913,42 +1305,75 @@ class Interruption:
             self.signum = signum
 
 
+def _task_children(pid: int, task: Path) -> list[int]:
+    """Read the children forked by one thread of a process.
+
+    Args:
+        pid: The process whose thread is read.
+        task: The thread's /proc task directory.
+
+    Returns:
+        The child PIDs; none when the thread is gone.
+
+    Raises:
+        FileNotFoundError: If this process's own main thread is unreadable.
+        ProcessLookupError: If this process's own main thread is unreadable.
+
+    """
+    try:
+        listing = (task / "children").read_text(encoding="ascii")
+    except (FileNotFoundError, ProcessLookupError):
+        if pid == os.getpid() and task.name == str(pid):
+            raise
+        return []
+    return [int(child) for child in listing.split()]
+
+
 def _process_children(pid: int) -> list[int]:
-    """Include children forked by any thread, regardless of their sessions."""
+    """Include children forked by any thread, regardless of their sessions.
+
+    Returns:
+        The child PIDs of every thread; none when the process is gone.
+
+    Raises:
+        FileNotFoundError: If this process's own threads are unreadable.
+        ProcessLookupError: If this process's own threads are unreadable.
+
+    """
     children: list[int] = []
     try:
         for task in (Path("/proc") / str(pid) / "task").iterdir():
-            try:
-                children.extend(
-                    int(child)
-                    for child in (task / "children").read_text(encoding="ascii").split()
-                )
-            except (FileNotFoundError, ProcessLookupError):
-                if pid == os.getpid() and task.name == str(pid):
-                    raise
-                continue
+            children.extend(_task_children(pid, task))
     except (FileNotFoundError, ProcessLookupError):
         if pid == os.getpid():
             raise
-        return children
     return children
 
 
 def _enable_subreaper() -> None:
-    """Keep orphaned worker descendants under this dedicated Linux supervisor."""
-    require(
+    """Keep orphaned worker descendants under this dedicated Linux supervisor.
+
+    Raises:
+        OSError: If prctl cannot set or read the child subreaper flag.
+        ValueError: If pidfd or prctl support is missing, the supervisor already
+            has children, or the subreaper flag did not take effect.
+
+    """
+    if not (
         sys.platform == "linux"
         and hasattr(os, "pidfd_open")
         and hasattr(os, "P_PIDFD")
-        and hasattr(signal, "pidfd_send_signal"),
-        "Linux pidfd ownership is required before launching the worker",
-    )
-    require(
-        not _process_children(os.getpid()),
-        "Dedicated supervisor already owns children",
-    )
+        and hasattr(signal, "pidfd_send_signal")
+    ):
+        msg = "Linux pidfd ownership is required before launching the worker"
+        raise ValueError(msg)
+    if _process_children(os.getpid()):
+        msg = "Dedicated supervisor already owns children"
+        raise ValueError(msg)
     libc = ctypes.CDLL(None, use_errno=True)
-    require(hasattr(libc, "prctl"), "Linux subreaper setup is unavailable")
+    if not hasattr(libc, "prctl"):
+        msg = "Linux subreaper setup is unavailable"
+        raise ValueError(msg)
     prctl = libc.prctl
     prctl.argtypes = [ctypes.c_int, *([ctypes.c_ulong] * 4)]
     prctl.restype = ctypes.c_int
@@ -958,11 +1383,18 @@ def _enable_subreaper() -> None:
     enabled = ctypes.c_int()
     if prctl(37, ctypes.addressof(enabled), 0, 0, 0) != 0:
         raise OSError(ctypes.get_errno(), "PR_GET_CHILD_SUBREAPER failed")
-    require(enabled.value == 1, "Linux child subreaper was not enabled")
+    if enabled.value != 1:
+        msg = "Linux child subreaper was not enabled"
+        raise ValueError(msg)
 
 
 def _pidfd_pid(descriptor: int) -> int:
-    """Read the kernel identity of a pidfd; reaped processes report minus one."""
+    """Read the kernel identity of a pidfd; reaped processes report minus one.
+
+    Returns:
+        The PID the descriptor refers to, or -1 once it was reaped.
+
+    """
     identity = dict(
         row.split(":", 1)
         for row in (Path("/proc/self/fdinfo") / str(descriptor))
@@ -972,56 +1404,223 @@ def _pidfd_pid(descriptor: int) -> int:
     return int(identity.get("Pid", ""))
 
 
+def _verified_children(
+    current: int,
+    parent: int,
+    supervisor: int,
+    descriptor: int,
+    descriptors: dict[int, int],
+) -> list[int] | None:
+    """Check a pidfd-pinned process is still the expected family member.
+
+    Args:
+        current: The candidate descendant PID.
+        parent: The pinned parent it was discovered under.
+        supervisor: This supervisor's PID.
+        descriptor: The candidate's pidfd.
+        descriptors: The already pinned descendants.
+
+    Returns:
+        The candidate's children, or None when it is no longer that member.
+
+    Raises:
+        ValueError: If the pidfd names another process or the owner changed.
+
+    """
+    process = Path("/proc") / str(current)
+    fields = (process / "stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+    owner = process.stat().st_uid
+    if int(fields[1]) != parent:
+        return None
+    children = _process_children(current)
+    # A pidfd survives reaping/PID reuse; reject /proc data from a
+    # replacement process before trusting its identity or children.
+    pinned_pid = _pidfd_pid(descriptor)
+    if pinned_pid == -1:
+        return None
+    if pinned_pid != current:
+        msg = "Unexpected pidfd process identity"
+        raise ValueError(msg)
+    if parent != supervisor and _pidfd_pid(descriptors[parent]) != parent:
+        return None
+    if owner != os.getuid():
+        msg = "Worker descendant changed its owner uid"
+        raise ValueError(msg)
+    return children
+
+
+def _pin(
+    current: int,
+    parent: int,
+    supervisor: int,
+    descriptors: dict[int, int],
+    pending: list[tuple[int, int]],
+) -> None:
+    """Pin one verified descendant and queue its children; close any rejected pidfd.
+
+    Args:
+        current: The candidate descendant PID.
+        parent: The pinned parent it was discovered under.
+        supervisor: This supervisor's PID.
+        descriptors: The pinned descendants, extended in place.
+        pending: The traversal queue, extended in place.
+
+    """
+    descriptor: int | None = os.pidfd_open(current)
+    try:
+        children = _verified_children(
+            current, parent, supervisor, descriptor, descriptors
+        )
+        if children is not None:
+            descriptors[current] = descriptor
+            descriptor = None
+            pending.extend((child, current) for child in children)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _pin_descendants(
+    supervisor: int,
+    pending: list[tuple[int, int]],
+    descriptors: dict[int, int],
+    deadline: float,
+) -> None:
+    """Walk the pending family tree until it is exhausted or the deadline passes.
+
+    Args:
+        supervisor: This supervisor's PID.
+        pending: The traversal queue of (PID, parent PID).
+        descriptors: The pinned descendants, extended in place.
+        deadline: The monotonic traversal deadline.
+
+    """
+    while pending and time.monotonic() < deadline:
+        current, parent = pending.pop()
+        if current in descriptors:
+            continue
+        try:
+            _pin(current, parent, supervisor, descriptors, pending)
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+
+
 def owned_processes(deadline: float) -> dict[int, int]:
-    """Pin verified descendants of this supervisor, including adopted orphans."""
+    """Pin verified descendants of this supervisor, including adopted orphans.
+
+    Returns:
+        Each pinned descendant PID mapped to its pidfd.
+
+    """
     supervisor = os.getpid()
     pending = [(child, supervisor) for child in _process_children(supervisor)]
     descriptors: dict[int, int] = {}
     try:
-        while pending and time.monotonic() < deadline:
-            current, parent = pending.pop()
-            if current in descriptors:
-                continue
-            descriptor: int | None = None
-            try:
-                descriptor = os.pidfd_open(current)
-                process = Path("/proc") / str(current)
-                fields = (
-                    (process / "stat")
-                    .read_text(encoding="ascii")
-                    .rsplit(")", 1)[1]
-                    .split()
-                )
-                owner = process.stat().st_uid
-                if int(fields[1]) != parent:
-                    continue
-                children = _process_children(current)
-                # A pidfd survives reaping/PID reuse; reject /proc data from a
-                # replacement process before trusting its identity or children.
-                pinned_pid = _pidfd_pid(descriptor)
-                if pinned_pid == -1:
-                    continue
-                require(pinned_pid == current, "Unexpected pidfd process identity")
-                if parent != supervisor and _pidfd_pid(descriptors[parent]) != parent:
-                    continue
-                require(owner == os.getuid(), "Worker descendant changed its owner uid")
-                descriptors[current] = descriptor
-                descriptor = None
-                pending.extend((child, current) for child in children)
-            except (FileNotFoundError, ProcessLookupError):
-                continue
-            finally:
-                if descriptor is not None:
-                    os.close(descriptor)
-        return descriptors
+        _pin_descendants(supervisor, pending, descriptors, deadline)
     except BaseException:
         for descriptor in descriptors.values():
             os.close(descriptor)
         raise
+    return descriptors
+
+
+def _adopt(
+    descriptors: dict[int, int], poller: select.poll, deadline: float
+) -> set[int]:
+    """Register newly pinned family members; close duplicate pidfds.
+
+    Args:
+        descriptors: The watched family, extended in place.
+        poller: The exit poller, extended in place.
+        deadline: The monotonic cleanup deadline.
+
+    Returns:
+        The pidfds added in this round.
+
+    """
+    added: set[int] = set()
+    for pid, descriptor in owned_processes(deadline).items():
+        if pid in descriptors:
+            os.close(descriptor)
+        else:
+            descriptors[pid] = descriptor
+            poller.register(descriptor, select.POLLIN)
+            added.add(descriptor)
+    return added
+
+
+def _reap(child: subprocess.Popen[bytes], pid: int, descriptor: int) -> bool:
+    """Reap one family member whose pidfd reported exit.
+
+    Args:
+        child: The worker root process.
+        pid: The exited member's PID.
+        descriptor: The exited member's pidfd.
+
+    Returns:
+        Whether the member is finished.
+
+    """
+    if pid == child.pid and child.returncode is None:
+        return child.poll() is not None
+    # A ChildProcessError means its parent still owns reaping, or already reaped
+    # it. Rediscovery will pin it again if it becomes adopted.
+    with contextlib.suppress(ChildProcessError):
+        os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+    return True
+
+
+def _signal_family(
+    child: subprocess.Popen[bytes],
+    descriptors: dict[int, int],
+    added: set[int],
+    term_deadline: float,
+    exited: dict[int, int],
+) -> tuple[list[int], bool]:
+    """Reap exited members and signal live ones.
+
+    New members get SIGTERM; every live member gets SIGKILL after the term
+    deadline.
+
+    Args:
+        child: The worker root process.
+        descriptors: The watched family.
+        added: The pidfds added in this round.
+        term_deadline: The monotonic SIGKILL deadline.
+        exited: The poll events of exited pidfds.
+
+    Returns:
+        The finished PIDs and whether any live member was seen.
+
+    """
+    finished: list[int] = []
+    saw_live = False
+    for pid, descriptor in descriptors.items():
+        if descriptor in exited:
+            if _reap(child, pid, descriptor):
+                finished.append(pid)
+            continue
+        saw_live = True
+        try:
+            if descriptor in added:
+                signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+            if time.monotonic() >= term_deadline:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+        except ProcessLookupError:
+            continue
+    return finished, saw_live
 
 
 def terminate(child: subprocess.Popen[bytes], deadline: float) -> bool:
-    """Reap the owned family within the reserve; report any live processes seen."""
+    """Reap the owned family within the reserve; report any live processes seen.
+
+    Returns:
+        Whether any live family member was seen.
+
+    Raises:
+        ValueError: If the family is not reaped within its reserve.
+
+    """
     cleanup_deadline = min(deadline, time.monotonic() + TERMINATION_SECONDS)
     term_deadline = cleanup_deadline - 1
     descriptors: dict[int, int] = {}
@@ -1029,40 +1628,14 @@ def terminate(child: subprocess.Popen[bytes], deadline: float) -> bool:
     saw_live = False
     try:
         while True:
-            added: set[int] = set()
-            for pid, descriptor in owned_processes(cleanup_deadline).items():
-                if pid in descriptors:
-                    os.close(descriptor)
-                else:
-                    descriptors[pid] = descriptor
-                    poller.register(descriptor, select.POLLIN)
-                    added.add(descriptor)
+            added = _adopt(descriptors, poller, cleanup_deadline)
             # Only Popen may reap its root and update its cached return code.
             child.poll()
             exited = dict(poller.poll(0))
-            finished: list[int] = []
-            for pid, descriptor in descriptors.items():
-                if descriptor in exited:
-                    if pid == child.pid and child.returncode is None:
-                        if child.poll() is None:
-                            continue
-                    else:
-                        try:
-                            os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
-                        except ChildProcessError:
-                            # Its parent still owns reaping, or already reaped it.
-                            # Rediscovery will pin it again if it becomes adopted.
-                            pass
-                    finished.append(pid)
-                    continue
-                saw_live = True
-                try:
-                    if descriptor in added:
-                        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
-                    if time.monotonic() >= term_deadline:
-                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
-                except ProcessLookupError:
-                    continue
+            finished, live = _signal_family(
+                child, descriptors, added, term_deadline, exited
+            )
+            saw_live = saw_live or live
             for pid in finished:
                 descriptor = descriptors.pop(pid)
                 poller.unregister(descriptor)
@@ -1075,10 +1648,12 @@ def terminate(child: subprocess.Popen[bytes], deadline: float) -> bool:
                 and not _process_children(os.getpid())
             ):
                 return saw_live
-            require(
-                time.monotonic() < cleanup_deadline,
-                "Worker family could not be terminated and reaped within its reserve",
-            )
+            if not (time.monotonic() < cleanup_deadline):
+                msg = (
+                    "Worker family could not be terminated and reaped within its "
+                    "reserve"
+                )
+                raise ValueError(msg)
             time.sleep(min(0.05, max(0.0, cleanup_deadline - time.monotonic())))
     finally:
         for descriptor in descriptors.values():
@@ -1086,17 +1661,26 @@ def terminate(child: subprocess.Popen[bytes], deadline: float) -> bool:
 
 
 def supervise(settings: Settings, suite: Suite, started: float) -> int:
-    """Enforce one deadline across capture, every frozen workload and admission."""
-    require(not os.path.lexists(settings.output), "Output directory must be fresh")
+    """Enforce one deadline across capture, every frozen workload and admission.
+
+    Returns:
+        Zero once the admitted metrics are printed.
+
+    Raises:
+        ValueError: If the output exists or no guarded time remains.
+
+    """
+    if os.path.lexists(settings.output):
+        msg = "Output directory must be fresh"
+        raise ValueError(msg)
     state = guard(settings)
     deadline = min(
         started + LIMIT_SECONDS,
         number(state.get("deadline_monotonic")) - RECOVERY_HEADROOM_SECONDS,
     )
-    require(
-        deadline - time.monotonic() > TERMINATION_SECONDS,
-        "No guarded execution time remains",
-    )
+    if not (deadline - time.monotonic() > TERMINATION_SECONDS):
+        msg = "No guarded execution time remains"
+        raise ValueError(msg)
     settings.output.mkdir(mode=0o700)
     try:
         return supervise_created(settings, suite, started, state, deadline)
@@ -1113,6 +1697,164 @@ def supervise(settings: Settings, suite: Suite, started: float) -> int:
         raise
 
 
+def executable(name: str) -> str:
+    """Resolve a host program on PATH.
+
+    Args:
+        name: The program name.
+
+    Returns:
+        The absolute path of the program.
+
+    Raises:
+        FileNotFoundError: If the program is not on PATH, as exec would report.
+
+    """
+    found = shutil.which(name)
+    if found is None:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+    return found
+
+
+def _bind_worker(child: subprocess.Popen[bytes], settings: Settings) -> None:
+    """Send the operator descriptor binding to the worker and close its stdin.
+
+    Args:
+        child: The worker root process.
+        settings: The operator settings.
+
+    Raises:
+        RuntimeError: If the worker has no stdin pipe.
+
+    """
+    if child.stdin is None:
+        msg = "Missing supervisor binding pipe"
+        raise RuntimeError(msg)
+    with child.stdin:
+        child.stdin.write(
+            exl3.canonical({
+                "identity": settings.operator_identity,
+                "sha256": settings.operator_sha256,
+            })
+        )
+
+
+def _watch_worker(
+    child: subprocess.Popen[bytes],
+    settings: Settings,
+    state: dict[str, object],
+    deadline: float,
+    interruption: Interruption,
+) -> None:
+    """Poll the worker until it exits, rechecking deadline and guardian ownership.
+
+    Args:
+        child: The worker root process.
+        settings: The operator settings.
+        state: The guardian status at supervisor start.
+        deadline: The monotonic supervisor deadline.
+        interruption: The deferred signal record.
+
+    Raises:
+        ValueError: If interrupted, out of time or the guardian ownership changed.
+
+    """
+    while child.poll() is None:
+        if interruption.signum is not None:
+            msg = "Canonical benchmark interrupted"
+            raise ValueError(msg)
+        if not (time.monotonic() < deadline - TERMINATION_SECONDS):
+            msg = (
+                "Canonical benchmark exceeded its guarded deadline; no partial metrics"
+            )
+            raise ValueError(msg)
+        current = guard(settings)
+        if not all(
+            current.get(key) == state.get(key)
+            for key in (
+                "candidate",
+                "guardian_pid",
+                "guardian_start",
+                "deadline_monotonic",
+                "lease_identity",
+            )
+        ):
+            msg = "Maintenance ownership changed during benchmark"
+            raise ValueError(msg)
+        time.sleep(
+            min(0.5, max(0.0, deadline - TERMINATION_SECONDS - time.monotonic()))
+        )
+
+
+def _record_measurement(
+    settings: Settings, suite: Suite, started: float
+) -> dict[str, float]:
+    """Bind the admitted metrics to the frozen workload and save measurement.json.
+
+    Args:
+        settings: The operator settings.
+        suite: The selected suite.
+        started: The monotonic supervisor start time.
+
+    Returns:
+        The ordered admitted metrics plus the elapsed seconds.
+
+    Raises:
+        ValueError: If the admission is incomplete, unbound or has unexpected
+            metrics.
+
+    """
+    admitted = exl3.document(settings.output / "admitted.json")
+    if not (
+        admitted.get("status") == "complete_admitted_measurement"
+        and admitted.get("schema_version") == 1
+        and admitted.get("protocol") == suite.protocol
+        and admitted.get("scope") == suite.scope
+        and admitted.get("order") == list(suite.order)
+        and admitted.get("primary_metric") == suite.primary_metric
+    ):
+        msg = "Missing complete frozen EXL3 admission"
+        raise ValueError(msg)
+    benchmark = exl3.document(settings.output / "benchmark.json")
+    if not (
+        admitted.get("benchmark_sha256")
+        == exl3.digest(settings.output / "benchmark.json")
+        and admitted.get("workload_sha256")
+        == benchmark.get("workload_sha256")
+        == hashlib.sha256(exl3.canonical(benchmark.get("workload"))).hexdigest()
+    ):
+        msg = "Admitted measurement is not bound to this complete frozen workload"
+        raise ValueError(msg)
+    values = mapping(admitted.get("metrics"))
+    names = set(suite.metric_names)
+    if not (names <= set(values) <= names | set(suite.optional_metrics)):
+        msg = "Missing or unexpected admitted metrics"
+        raise ValueError(msg)
+    ordered = [
+        *suite.metric_names,
+        *(name for name in suite.optional_metrics if name in values),
+    ]
+    metrics = {name: number(values[name]) for name in ordered}
+    metrics["elapsed_seconds"] = time.monotonic() - started
+    exl3.save(
+        settings.output / "measurement.json",
+        {
+            "schema_version": 1,
+            "status": "complete_admitted_measurement",
+            "protocol": suite.protocol,
+            "workload_sha256": admitted["workload_sha256"],
+            "metrics": metrics,
+            "admitted_sha256": exl3.digest(settings.output / "admitted.json"),
+            "elapsed_scope": (
+                "entire canonical command through raw-evidence admission; "
+                "not decode-only time"
+            ),
+            "finished_monotonic": time.monotonic(),
+        },
+    )
+    return metrics
+
+
 def supervise_created(
     settings: Settings,
     suite: Suite,
@@ -1120,7 +1862,16 @@ def supervise_created(
     state: dict[str, object],
     deadline: float,
 ) -> int:
-    """Use only the fresh output directory exclusively created by this invocation."""
+    """Use only the fresh output directory exclusively created by this invocation.
+
+    Returns:
+        Zero once the admitted metrics are printed.
+
+    Raises:
+        ValueError: If the worker failed, left descendants or finished outside the
+            deadline, or finalization was late or interrupted.
+
+    """
     _enable_subreaper()
     (settings.output / "logs").mkdir(mode=0o700)
     sources = exl3.snapshot_sources(settings.output, suite.sources)
@@ -1159,9 +1910,9 @@ def supervise_created(
             (settings.output / "logs/worker.stdout").open("xb") as stdout,
             (settings.output / "logs/worker.stderr").open("xb") as stderr,
         ):
-            child = subprocess.Popen(
+            child = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: nix develop + sys.executable re-running this module as worker, no shell
                 [
-                    "nix",
+                    executable("nix"),
                     "develop",
                     "--offline",
                     "--no-write-lock-file",
@@ -1180,108 +1931,26 @@ def supervise_created(
                 start_new_session=True,
             )
             try:
-                if child.stdin is None:
-                    raise RuntimeError("Missing supervisor binding pipe")
-                with child.stdin:
-                    child.stdin.write(
-                        exl3.canonical({
-                            "identity": settings.operator_identity,
-                            "sha256": settings.operator_sha256,
-                        })
-                    )
-                while child.poll() is None:
-                    require(
-                        interruption.signum is None, "Canonical benchmark interrupted"
-                    )
-                    require(
-                        time.monotonic() < deadline - TERMINATION_SECONDS,
-                        "Canonical benchmark exceeded its guarded deadline; no partial metrics",
-                    )
-                    current = guard(settings)
-                    require(
-                        all(
-                            current.get(key) == state.get(key)
-                            for key in (
-                                "candidate",
-                                "guardian_pid",
-                                "guardian_start",
-                                "deadline_monotonic",
-                                "lease_identity",
-                            )
-                        ),
-                        "Maintenance ownership changed during benchmark",
-                    )
-                    time.sleep(
-                        min(
-                            0.5,
-                            max(0.0, deadline - TERMINATION_SECONDS - time.monotonic()),
-                        )
-                    )
+                _bind_worker(child, settings)
+                _watch_worker(child, settings, state, deadline, interruption)
             except BaseException:
                 terminate(child, deadline)
                 raise
             descendants_survived = terminate(child, deadline)
-            require(
-                child.returncode == 0,
-                "Canonical worker failed; inspect private evidence",
-            )
-            require(
-                not descendants_survived,
-                "Canonical worker left live descendants; no admitted metrics",
-            )
-        require(
-            interruption.signum is None and time.monotonic() < deadline,
-            "Canonical benchmark finished outside its guarded deadline",
-        )
+            if child.returncode != 0:
+                msg = "Canonical worker failed; inspect private evidence"
+                raise ValueError(msg)
+            if descendants_survived:
+                msg = "Canonical worker left live descendants; no admitted metrics"
+                raise ValueError(msg)
+        if not (interruption.signum is None and time.monotonic() < deadline):
+            msg = "Canonical benchmark finished outside its guarded deadline"
+            raise ValueError(msg)
         guard(settings)
-        admitted = exl3.document(settings.output / "admitted.json")
-        require(
-            admitted.get("status") == "complete_admitted_measurement"
-            and admitted.get("schema_version") == 1
-            and admitted.get("protocol") == suite.protocol
-            and admitted.get("scope") == suite.scope
-            and admitted.get("order") == list(suite.order)
-            and admitted.get("primary_metric") == suite.primary_metric,
-            "Missing complete frozen EXL3 admission",
-        )
-        benchmark = exl3.document(settings.output / "benchmark.json")
-        require(
-            admitted.get("benchmark_sha256")
-            == exl3.digest(settings.output / "benchmark.json")
-            and admitted.get("workload_sha256")
-            == benchmark.get("workload_sha256")
-            == hashlib.sha256(exl3.canonical(benchmark.get("workload"))).hexdigest(),
-            "Admitted measurement is not bound to this complete frozen workload",
-        )
-        values = mapping(admitted.get("metrics"))
-        names = set(suite.metric_names)
-        require(
-            names <= set(values) <= names | set(suite.optional_metrics),
-            "Missing or unexpected admitted metrics",
-        )
-        ordered = [
-            *suite.metric_names,
-            *(name for name in suite.optional_metrics if name in values),
-        ]
-        metrics = {name: number(values[name]) for name in ordered}
-        metrics["elapsed_seconds"] = time.monotonic() - started
-        exl3.save(
-            settings.output / "measurement.json",
-            {
-                "schema_version": 1,
-                "status": "complete_admitted_measurement",
-                "protocol": suite.protocol,
-                "workload_sha256": admitted["workload_sha256"],
-                "metrics": metrics,
-                "admitted_sha256": exl3.digest(settings.output / "admitted.json"),
-                "elapsed_scope": "entire canonical command through raw-evidence admission; not decode-only time",
-                "finished_monotonic": time.monotonic(),
-            },
-        )
-        require(
-            time.monotonic() < deadline and interruption.signum is None,
-            "Finalization exceeded deadline or was interrupted",
-        )
+        metrics = _record_measurement(settings, suite, started)
+        if not (time.monotonic() < deadline and interruption.signum is None):
+            msg = "Finalization exceeded deadline or was interrupted"
+            raise ValueError(msg)
         sys.stdout.write(
             "".join(f"METRIC {name}={value:.17g}\n" for name, value in metrics.items())
         )
@@ -1292,21 +1961,73 @@ def supervise_created(
 
 
 def arguments(values: list[str]) -> tuple[Suite, bool]:
-    """Parse the required suite choice (no default) and the internal worker flag."""
-    require(bool(values), "A suite is required: --suite broad|prefill")
-    require(
-        values[0] == "--suite" and len(values) >= 2,
-        "Expected --suite broad|prefill first",
-    )
+    """Parse the required suite choice (no default) and the internal worker flag.
+
+    Returns:
+        The selected suite and whether this process is the worker.
+
+    Raises:
+        ValueError: If the suite is missing or unknown, or arguments follow it.
+
+    """
+    if not bool(values):
+        msg = "A suite is required: --suite broad|prefill"
+        raise ValueError(msg)
+    if not (values[0] == "--suite" and len(values) >= SUITE_ARGUMENTS):
+        msg = "Expected --suite broad|prefill first"
+        raise ValueError(msg)
     suite = SUITES.get(values[1])
     if suite is None:
-        raise ValueError(f"Unknown suite {values[1]!r}; expected broad or prefill")
-    require(values[2:] in ([], ["--worker"]), "Unexpected arguments after the suite")
+        msg = f"Unknown suite {values[1]!r}; expected broad or prefill"
+        raise ValueError(msg)
+    if values[2:] not in ([], ["--worker"]):
+        msg = "Unexpected arguments after the suite"
+        raise ValueError(msg)
     return suite, values[2:] == ["--worker"]
 
 
+def _run_worker(settings: Settings, suite: Suite) -> int:
+    """Check the supervisor's descriptor binding, then run the worker once.
+
+    Args:
+        settings: The operator settings.
+        suite: The selected suite.
+
+    Returns:
+        The worker's exit status.
+
+    Raises:
+        ValueError: If the binding differs from the supervisor's descriptor.
+
+    """
+    binding = mapping(exl3.loads(sys.stdin.buffer.read(4097)))
+    if binding != {
+        "identity": settings.operator_identity,
+        "sha256": settings.operator_sha256,
+    }:
+        msg = "Worker operator descriptor differs from supervisor startup"
+        raise ValueError(msg)
+    try:
+        return worker(settings, suite)
+    except FAILURES as error:
+        exl3.save(
+            settings.output / "worker-failure.json",
+            {
+                "status": "rejected",
+                "error_type": type(error).__name__,
+                "reason": str(error),
+            },
+        )
+        raise
+
+
 def main() -> int:
-    """Run the finite supervisor; preserve sanitized failure diagnostics privately."""
+    """Run the finite supervisor; preserve sanitized failure diagnostics privately.
+
+    Returns:
+        The process exit status.
+
+    """
     started = time.monotonic()
     os.umask(0o077)
     try:
@@ -1317,31 +2038,12 @@ def main() -> int:
     try:
         settings = Settings.descriptor()
         if is_worker:
-            binding = mapping(exl3.loads(sys.stdin.buffer.read(4097)))
-            require(
-                binding
-                == {
-                    "identity": settings.operator_identity,
-                    "sha256": settings.operator_sha256,
-                },
-                "Worker operator descriptor differs from supervisor startup",
-            )
-            try:
-                return worker(settings, suite)
-            except FAILURES as error:
-                exl3.save(
-                    settings.output / "worker-failure.json",
-                    {
-                        "status": "rejected",
-                        "error_type": type(error).__name__,
-                        "reason": str(error),
-                    },
-                )
-                raise
+            return _run_worker(settings, suite)
         return supervise(settings, suite, started)
     except FAILURES:
         sys.stderr.write(
-            "EXL3 autoresearch rejected; no admitted metrics. Inspect private artifacts.\n"
+            "EXL3 autoresearch rejected; no admitted metrics. "
+            "Inspect private artifacts.\n"
         )
         return 1
 

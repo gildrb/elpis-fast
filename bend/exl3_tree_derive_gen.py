@@ -1,16 +1,19 @@
-"""Generate bend/exl3_tree_derive_proof.bend: exhaustive case analysis over the
-5040 legal parent arrays; derive_refinement's legal leaves are closed top-level
-lemmas. Usage: python3 -B bend/exl3_tree_derive_gen.py <repo root>."""
+# Copyright (c) 2026 Gil Rodrigues
+"""Generate bend/exl3_tree_derive_proof.bend by exhaustive case analysis.
+
+The analysis runs over the 5040 legal parent arrays; derive_refinement's legal
+leaves are closed top-level lemmas. Usage:
+python3 -B bend/exl3_tree_derive_gen.py <repo root>.
+"""
 
 import sys
+from collections.abc import Callable
 from itertools import product
 from pathlib import Path
 
-root = Path(sys.argv[1])
 R7 = range(1, 8)
 QQ = ", ".join(f"q{i}" for i in R7)
-out = [
-    """# Proofs of the derive laws of bend/exl3_tree_accept_laws.bend by exhaustive
+HEADER = """# Proofs of the derive laws of bend/exl3_tree_accept_laws.bend by exhaustive
 # case analysis over the legal parent arrays (q_r < r: 7! = 5040 shapes);
 # every illegal branch is refuted by the legality premise, every legal leaf is
 # checked by evaluating both sides. The legal leaves of derive_refinement are
@@ -26,33 +29,88 @@ import ./exl3_tree_accept_spec.bend as Spec
 import ./exl3_tree_accept_laws.bend as Laws
 import ./exl3_accept_proof.bend as ChainProof
 """
-]
+SHAPE_COUNT = 5040
+LAST_ROW = 8
 
 SHAPES = list(product(*[range(r) for r in R7]))
-assert len(SHAPES) == 5040
+if len(SHAPES) != SHAPE_COUNT:
+    raise AssertionError
+
+type Goal = Callable[[list[str]], str]
 
 
-def refine_goal(v):
-    return f"{{Impl.bytes(Impl.derive({', '.join(v)})) == Spec.derive([{', '.join(v)}]) : List<&2, Nat>}}"
+def refine_goal(v: list[str]) -> str:
+    """Return the derive_refinement goal for the parent values ``v``.
+
+    Args:
+        v: The seven parent expressions.
+
+    Returns:
+        The Bend goal text.
+
+    """
+    return (
+        f"{{Impl.bytes(Impl.derive({', '.join(v)})) == "
+        f"Spec.derive([{', '.join(v)}]) : List<&2, Nat>}}"
+    )
 
 
-def leaves(prefix, goal_of):
-    lines = []
+def sound_goal(v: list[str]) -> str:
+    """Return the derive_sound goal for the parent values ``v``.
+
+    Args:
+        v: The seven parent expressions.
+
+    Returns:
+        The Bend goal text.
+
+    """
+    return (
+        f"{{Spec.sound([{', '.join(v)}], Spec.derive([{', '.join(v)}])) "
+        "== True{} : Bool}"
+    )
+
+
+def leaves(prefix: str, goal_of: Goal) -> str:
+    """Return one closed lemma per legal shape.
+
+    Args:
+        prefix: The lemma name prefix.
+        goal_of: Maps the seven values to the goal text.
+
+    Returns:
+        The lemma definitions.
+
+    """
+    lines: list[str] = []
     for shape in SHAPES:
         name = prefix + "".join(str(q) for q in shape)
-        lines.append(f"def {name}() -> {goal_of([f'{q}n' for q in shape])}:")
-        lines.append("  {==}")
-        lines.append("")
+        lines.extend((
+            f"def {name}() -> {goal_of([f'{q}n' for q in shape])}:",
+            "  {==}",
+            "",
+        ))
     return "\n".join(lines)
 
 
-def gen(name, goal_of, prefix=None):
-    """goal_of(values) -> goal text; values: list of 7 expressions. With a
-    prefix, legal leaves call the closed lemmas prefix<digits>()."""
+def gen(name: str, goal_of: Goal, prefix: str | None = None) -> str:
+    """Return the case tree of the law ``name``.
+
+    With a prefix, legal leaves call the closed lemmas prefix<digits>().
+
+    Args:
+        name: The law name.
+        goal_of: Maps the seven value expressions to the goal text.
+        prefix: The closed lemma prefix, if any.
+
+    Returns:
+        The law definition.
+
+    """
     lines = [f"def {name}({QQ}, legal):"]
 
-    def rec(r, vals, ind):
-        if r == 8:
+    def rec(r: int, vals: list[str], ind: str) -> None:
+        if r == LAST_ROW:
             lines.append(
                 f"{ind}{prefix}{''.join(v[:-1] for v in vals)}()"
                 if prefix
@@ -61,43 +119,50 @@ def gen(name, goal_of, prefix=None):
             return
         var = f"q{r}"
         for v in range(r):
-            lines.append(f"{ind}match {var}:")
-            lines.append(f"{ind}  case 0n:")
-            rec(r + 1, vals + [f"{v}n"], ind + "    ")
+            lines.extend((f"{ind}match {var}:", f"{ind}  case 0n:"))
+            rec(r + 1, [*vals, f"{v}n"], ind + "    ")
             nv = f"{var}_{v}"
             lines.append(f"{ind}  case 1n+{nv}:")
             ind += "    "
             var = nv
         rest = [f"q{i}" for i in range(r + 1, 8)]
-        lines.append(f"{ind}match {var}:")
-        lines.append(f"{ind}  case 0n:")
-        lines.append(
-            f"{ind}    Empty.absurd({goal_of(vals + [f'{r}n'] + rest)}, ChainProof.false_true(legal))"
-        )
-        lines.append(f"{ind}  case 1n+{var}_x:")
+        lines.extend((
+            f"{ind}match {var}:",
+            f"{ind}  case 0n:",
+            (
+                f"{ind}    Empty.absurd({goal_of([*vals, f'{r}n', *rest])}, "
+                "ChainProof.false_true(legal))"
+            ),
+            f"{ind}  case 1n+{var}_x:",
+        ))
         big = f"{r + 1}n+{var}_x" if prefix else f"Nat.add({r + 1}n, {var}_x)"
         lines.append(
-            f"{ind}    Empty.absurd({goal_of(vals + [big] + rest)}, ChainProof.false_true(legal))"
+            f"{ind}    Empty.absurd({goal_of([*vals, big, *rest])}, "
+            "ChainProof.false_true(legal))"
         )
 
     rec(1, [], "  ")
     return "\n".join(lines) + "\n"
 
 
-out.append(
-    "# Legal leaves of derive_refinement: the executed leaf's bytes are the reference's."
-)
-out.append(leaves("refine_", refine_goal))
-out.append(gen("Laws.derive_refinement", refine_goal, "refine_"))
-out.append(
-    gen(
-        "Laws.derive_sound",
-        lambda v: (
-            f"{{Spec.sound([{', '.join(v)}], Spec.derive([{', '.join(v)}])) == True{{}} : Bool}}"
+def main() -> None:
+    """Write bend/exl3_tree_derive_proof.bend under the root in argv[1]."""
+    root = Path(sys.argv[1])
+    out = [
+        HEADER,
+        (
+            "# Legal leaves of derive_refinement: "
+            "the executed leaf's bytes are the reference's."
         ),
-    )
-)
-out.append("""def Laws.sound_rejects():
+        leaves("refine_", refine_goal),
+        gen("Laws.derive_refinement", refine_goal, "refine_"),
+        gen("Laws.derive_sound", sound_goal),
+        """def Laws.sound_rejects():
   ({==}, {==}, {==})
-""")
-(root / "bend/exl3_tree_derive_proof.bend").write_text("\n".join(out))
+""",
+    ]
+    (root / "bend/exl3_tree_derive_proof.bend").write_text("\n".join(out))
+
+
+if __name__ == "__main__":
+    main()

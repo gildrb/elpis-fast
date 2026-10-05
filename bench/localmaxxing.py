@@ -1,5 +1,5 @@
-# Copyright (c) 2026 inference contributors.
-r"""Measure the endpoint on LocalMaxxing's canonical prompts and build speed-test payloads.
+# Copyright (c) 2026 Gil Rodrigues
+r"""Measure the endpoint on LocalMaxxing's canonical prompts; build speed-test payloads.
 
 Fixed before measuring:
 
@@ -31,11 +31,14 @@ Standard library only; the record and payloads carry no credentials.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
+import os
 import platform
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -56,7 +59,6 @@ from bench.exl3 import (
     loads,
     mapping,
     request_bytes,
-    require,
     save,
     sequence,
     text,
@@ -232,7 +234,7 @@ class Setup:
 
 
 def sha256(value: str) -> str:
-    """SHA-256 of UTF-8 text.
+    """Hash UTF-8 text with SHA-256.
 
     Returns:
         The lowercase hex digest.
@@ -246,6 +248,9 @@ def parse_arguments() -> Arguments:
 
     Returns:
         The typed arguments.
+
+    Raises:
+        ValueError: If the image ID is not ``sha256:<64 lowercase hex>``.
 
     """
     parser = argparse.ArgumentParser(description=__doc__)
@@ -264,10 +269,9 @@ def parse_arguments() -> Arguments:
         image_id=option(namespace, "image_id", str),
         out=option(namespace, "out", Path),
     )
-    require(
-        IMAGE_ID.fullmatch(arguments.image_id) is not None,
-        "--image-id must be sha256:<64 lowercase hex>",
-    )
+    if not (IMAGE_ID.fullmatch(arguments.image_id) is not None):
+        msg = "--image-id must be sha256:<64 lowercase hex>"
+        raise ValueError(msg)
     return arguments
 
 
@@ -276,6 +280,10 @@ def catalog(path: Path) -> tuple[list[Prompt], list[str]]:
 
     Returns:
         The prompts in pinned order and the accepted GPU names.
+
+    Raises:
+        ValueError: If a pinned prompt is missing, duplicated, changed or needs more
+            than the output budget.
 
     """
     context = mapping(loads(path.read_bytes()))
@@ -287,25 +295,44 @@ def catalog(path: Path) -> tuple[list[Prompt], list[str]]:
             continue
         body = text(item.get("text"))
         digest_hex = sha256(body)
-        require(
-            digest_hex == PROMPT_SHA256[identifier]
-            and item.get("sha256") == digest_hex,
-            f"Canonical prompt {identifier} differs from its pinned SHA-256",
-        )
+        if not (
+            digest_hex == PROMPT_SHA256[identifier] and item.get("sha256") == digest_hex
+        ):
+            msg = f"Canonical prompt {identifier} differs from its pinned SHA-256"
+            raise ValueError(msg)
         minimum = integer(item.get("minOutputTokens"))
-        require(
-            1 <= minimum <= MAX_TOKENS,
-            f"{identifier} needs more than {MAX_TOKENS} output tokens",
-        )
-        require(identifier not in found, f"Duplicate canonical prompt {identifier}")
+        if not (1 <= minimum <= MAX_TOKENS):
+            msg = f"{identifier} needs more than {MAX_TOKENS} output tokens"
+            raise ValueError(msg)
+        if not (identifier not in found):
+            msg = f"Duplicate canonical prompt {identifier}"
+            raise ValueError(msg)
         found[identifier] = Prompt(identifier, body, digest_hex, minimum)
-    require(
-        set(found) == set(PROMPT_SHA256),
-        "The saved agent context lacks a pinned canonical prompt",
-    )
+    if set(found) != set(PROMPT_SHA256):
+        msg = "The saved agent context lacks a pinned canonical prompt"
+        raise ValueError(msg)
     hardware = mapping(context.get("hardwareOptions"))
     names = [text(name) for name in sequence(hardware.get("discreteGpuNames"))]
     return [found[identifier] for identifier in PROMPT_SHA256], names
+
+
+def executable(name: str) -> str:
+    """Resolve a host program on PATH.
+
+    Args:
+        name: The program name.
+
+    Returns:
+        The absolute path of the program.
+
+    Raises:
+        FileNotFoundError: If the program is not on PATH, as exec would report.
+
+    """
+    found = shutil.which(name)
+    if found is None:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+    return found
 
 
 def query(fields: tuple[str, ...]) -> dict[str, str]:
@@ -314,10 +341,13 @@ def query(fields: tuple[str, ...]) -> dict[str, str]:
     Returns:
         Field name to its unformatted value.
 
+    Raises:
+        ValueError: If nvidia-smi returns another number of fields.
+
     """
-    result = subprocess.run(
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: nvidia-smi from PATH + fixed query flags, no shell
         [
-            "nvidia-smi",
+            executable("nvidia-smi"),
             f"--id={GPU}",
             f"--query-gpu={','.join(fields)}",
             "--format=csv,noheader,nounits",
@@ -328,8 +358,101 @@ def query(fields: tuple[str, ...]) -> dict[str, str]:
         timeout=10,
     )
     values = [value.strip() for value in result.stdout.strip().split(",")]
-    require(len(values) == len(fields), "nvidia-smi returned an unexpected field count")
+    if len(values) != len(fields):
+        msg = "nvidia-smi returned an unexpected field count"
+        raise ValueError(msg)
     return dict(zip(fields, values, strict=True))
+
+
+def answer_text(choice: dict[str, object]) -> str:
+    """Join the reply message's reasoning and content.
+
+    Args:
+        choice: The single chat completion choice.
+
+    Returns:
+        The reasoning text (empty when null) followed by the content.
+
+    Raises:
+        ValueError: If ``reasoning_content`` is neither text nor null.
+        TypeError: If ``content`` is not text.
+
+    """
+    answer = mapping(choice.get("message"))
+    reasoning = answer.get("reasoning_content")
+    content = answer.get("content")
+    if reasoning is None:
+        thinking = ""
+    elif isinstance(reasoning, str):
+        thinking = reasoning
+    else:
+        msg = "reasoning_content must be text or null"
+        raise ValueError(msg)
+    if not isinstance(content, str):
+        msg = "content must be text"
+        raise TypeError(msg)
+    return thinking + content
+
+
+def spec_counts(
+    usage: dict[str, object], completion: int, max_tokens: int, prompt: Prompt
+) -> tuple[int, int]:
+    """Validate the server's speculative counters against the token counts.
+
+    Args:
+        usage: The reply's usage object.
+        completion: The reply's completion token count.
+        max_tokens: The request's output budget.
+        prompt: The prompt the reply answers.
+
+    Returns:
+        The verify rounds and the committed tokens.
+
+    Raises:
+        ValueError: If the counters are not exactly rounds and committed, or are
+            inconsistent with the token counts.
+
+    """
+    spec = mapping(usage.get("exl3_spec"))
+    if set(spec) != {"rounds", "committed"}:
+        msg = "Unexpected exl3_spec fields"
+        raise ValueError(msg)
+    rounds, committed = integer(spec["rounds"]), integer(spec["committed"])
+    if not (
+        1 <= completion <= max_tokens
+        and 0 <= rounds <= committed <= completion
+        and committed <= (DRAFT_PROPOSALS + 1) * rounds
+    ):
+        msg = (
+            f"{prompt.identifier} reply has inconsistent token or speculative counters"
+        )
+        raise ValueError(msg)
+    return rounds, committed
+
+
+def reply_choice(body: dict[str, object]) -> tuple[str, str]:
+    """Validate the reply's single choice.
+
+    Args:
+        body: The chat completion response object.
+
+    Returns:
+        The finish reason and the reasoning text followed by the content.
+
+    Raises:
+        ValueError: If there is not exactly one choice or it did not finish.
+
+    """
+    choices = sequence(body.get("choices"))
+    if len(choices) != 1:
+        msg = "Expected exactly one choice"
+        raise ValueError(msg)
+    choice = mapping(choices[0])
+    finish = text(choice.get("finish_reason"))
+    if finish not in FINISH_REASONS:
+        msg = f"Unexpected finish reason {finish}"
+        raise ValueError(msg)
+    return finish, answer_text(choice)
 
 
 def chat(client: Client, prompt: Prompt, max_tokens: int) -> Reply:
@@ -337,6 +460,9 @@ def chat(client: Client, prompt: Prompt, max_tokens: int) -> Reply:
 
     Returns:
         The validated reply, with VRAM read after the body arrived.
+
+    Raises:
+        ValueError: If the endpoint does not return HTTP 200.
 
     """
     message = NONCE_LINE.format(nonce=secrets.token_hex(16)) + prompt.text
@@ -349,35 +475,14 @@ def chat(client: Client, prompt: Prompt, max_tokens: int) -> Reply:
     started = time.monotonic_ns()
     status, raw = client.exchange("POST", "/v1/chat/completions", payload)
     finished = time.monotonic_ns()
-    require(status == HTTP_OK, f"{prompt.identifier} request returned HTTP {status}")
+    if status != HTTP_OK:
+        msg = f"{prompt.identifier} request returned HTTP {status}"
+        raise ValueError(msg)
     body = mapping(loads(raw))
-    choices = sequence(body.get("choices"))
-    require(len(choices) == 1, "Expected exactly one choice")
-    choice = mapping(choices[0])
-    finish = text(choice.get("finish_reason"))
-    require(finish in FINISH_REASONS, f"Unexpected finish reason {finish}")
-    answer = mapping(choice.get("message"))
-    reasoning = answer.get("reasoning_content")
-    content = answer.get("content")
-    if reasoning is None:
-        thinking = ""
-    elif isinstance(reasoning, str):
-        thinking = reasoning
-    else:
-        raise ValueError("reasoning_content must be text or null")
-    if not isinstance(content, str):
-        raise ValueError("content must be text")
+    finish, output = reply_choice(body)
     usage = mapping(body.get("usage"))
     completion = integer(usage.get("completion_tokens"))
-    spec = mapping(usage.get("exl3_spec"))
-    require(set(spec) == {"rounds", "committed"}, "Unexpected exl3_spec fields")
-    rounds, committed = integer(spec["rounds"]), integer(spec["committed"])
-    require(
-        1 <= completion <= max_tokens
-        and 0 <= rounds <= committed <= completion
-        and committed <= (DRAFT_PROPOSALS + 1) * rounds,
-        f"{prompt.identifier} reply has inconsistent token or speculative counters",
-    )
+    rounds, committed = spec_counts(usage, completion, max_tokens, prompt)
     return Reply(
         message=message,
         started_ns=started,
@@ -387,7 +492,7 @@ def chat(client: Client, prompt: Prompt, max_tokens: int) -> Reply:
         finish_reason=finish,
         rounds=rounds,
         committed=committed,
-        output=thinking + content,
+        output=output,
         usage=usage,
         vram_mib=int(query(("memory.used",))["memory.used"]),
     )
@@ -399,43 +504,55 @@ def measure(client: Client, prompt: Prompt) -> tuple[Reply, list[Pair]]:
     Returns:
         The warmup reply and the timed pairs in order.
 
+    Raises:
+        ValueError: If a full request is below the verified-run minimum or not
+            longer than its TTFT request.
+
     """
     warmup = chat(client, prompt, MAX_TOKENS)
     pairs: list[Pair] = []
     for _ in range(TIMED_PAIRS):
         probe = chat(client, prompt, 1)
         full = chat(client, prompt, MAX_TOKENS)
-        require(
+        if not (
             full.rounds >= 1
             and full.completion_tokens >= prompt.min_output_tokens
-            and full.output != "",
-            f"{prompt.identifier} full request is below the verified-run minimum",
-        )
-        require(
-            full.wall_seconds > probe.wall_seconds,
-            f"{prompt.identifier} TTFT is not shorter than the full request",
-        )
+            and bool(full.output)
+        ):
+            msg = f"{prompt.identifier} full request is below the verified-run minimum"
+            raise ValueError(msg)
+        if not (full.wall_seconds > probe.wall_seconds):
+            msg = f"{prompt.identifier} TTFT is not shorter than the full request"
+            raise ValueError(msg)
         pairs.append(Pair(probe, full))
     return warmup, pairs
 
 
 def median_index(pairs: list[Pair]) -> int:
-    """Index of the pair with the median tokSOut (odd pair count).
+    """Find the pair with the median tokSOut (odd pair count).
 
     Returns:
         The index into ``pairs``.
 
+    Raises:
+        ValueError: If the pair count is even.
+
     """
-    require(len(pairs) % 2 == 1, "The median needs an odd number of pairs")
+    if len(pairs) % 2 != 1:
+        msg = "The median needs an odd number of pairs"
+        raise ValueError(msg)
     order = sorted(range(len(pairs)), key=lambda index: pairs[index].tok_s_out)
     return order[len(order) // 2]
 
 
 def pooled_watts(sampler: PowerSampler, pairs: list[Pair]) -> float:
-    """Board energy over the timed full requests divided by their summed wall time.
+    """Divide board energy over the timed full requests by their summed wall time.
 
     Returns:
         Mean board watts.
+
+    Raises:
+        TypeError: If the power samples do not cover a timed request.
 
     """
     joules = 0.0
@@ -448,37 +565,20 @@ def pooled_watts(sampler: PowerSampler, pairs: list[Pair]) -> float:
             sampler.max_gap_ns,
         )["joules"]
         if not isinstance(value, float):
-            raise ValueError("Power samples do not cover a timed request")
+            msg = "Power samples do not cover a timed request"
+            raise TypeError(msg)
         joules += value
         seconds += pair.full.wall_seconds
     return joules / seconds
 
 
-def setup(image_id: str, gpu: dict[str, str]) -> Setup:
-    """Collect the served identity, launch recipe and host facts.
+def patch_count() -> int:
+    """Count the patches named by the image's patch series files.
 
     Returns:
-        The shared payload inputs.
+        The number of non-comment, non-blank series lines.
 
     """
-    manifest = mapping(loads(MANIFEST.read_bytes()))
-    sources = mapping(manifest.get("source_revisions"))
-    target = mapping(sources.get("target"))
-    draft = mapping(sources.get("draft"))
-    engine = text(manifest.get("engine_revision"))
-    require(engine in ENGINE_VERSIONS, f"No recorded ExLlamaV3 version for {engine}")
-    target_repository = text(target.get("repository"))
-    require(
-        target_repository.endswith("-" + QUANTIZATION),
-        f"The target is not an {QUANTIZATION} repository",
-    )
-    recipe = " ".join(
-        ENTRYPOINT.read_text(encoding="utf-8").replace("\\\n", " ").split()
-    )
-    require(
-        f"exec {COMMAND}" in recipe,
-        "serve/exl3-entrypoint.sh no longer launches the recorded command",
-    )
     patches = 0
     for series in PATCH_SERIES:
         patches += sum(
@@ -486,20 +586,58 @@ def setup(image_id: str, gpu: dict[str, str]) -> Setup:
             for line in series.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         )
+    return patches
+
+
+def cpu_model() -> str:
+    """Read the host CPU model name.
+
+    Returns:
+        The first ``model name`` of /proc/cpuinfo.
+
+    Raises:
+        ValueError: If /proc/cpuinfo has no model name.
+
+    """
     cpu = ""
     for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
         if line.startswith("model name"):
             cpu = line.split(":", 1)[1].strip()
             break
-    require(cpu != "", "/proc/cpuinfo has no model name")
+    if not bool(cpu):
+        msg = "/proc/cpuinfo has no model name"
+        raise ValueError(msg)
+    return cpu
+
+
+def os_pretty_name() -> str:
+    """Read the host distribution name.
+
+    Returns:
+        ``PRETTY_NAME`` of /etc/os-release.
+
+    """
     release: dict[str, str] = {}
     for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
         key, separator, value = line.partition("=")
         if separator:
             release[key] = value.strip().strip('"')
-    pretty = text(release.get("PRETTY_NAME"))
-    dmi = subprocess.run(
-        ["udevadm", "info", "/sys/devices/virtual/dmi/id"],
+    return text(release.get("PRETTY_NAME"))
+
+
+def installed_memory_bytes() -> int:
+    """Sum the DMI memory device sizes.
+
+    Returns:
+        Installed memory in bytes, a whole number of GiB.
+
+    Raises:
+        TypeError: If a matched DMI memory size is not text.
+        ValueError: If DMI reports no memory or not a whole number of GiB.
+
+    """
+    dmi = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: udevadm from PATH + fixed DMI sysfs path, no shell
+        [executable("udevadm"), "info", "/sys/devices/virtual/dmi/id"],
         capture_output=True,
         text=True,
         check=True,
@@ -509,13 +647,56 @@ def setup(image_id: str, gpu: dict[str, str]) -> Setup:
     for match in DMI_MEMORY_SIZE.finditer(dmi):
         size = match.group(1)
         if not isinstance(size, str):
-            raise ValueError("Unreadable DMI memory size")
+            msg = "Unreadable DMI memory size"
+            raise TypeError(msg)
         sizes.append(int(size))
-    require(sizes != [], "DMI reports no memory devices")
+    if sizes == []:
+        msg = "DMI reports no memory devices"
+        raise ValueError(msg)
     ram_bytes = sum(sizes)
-    require(ram_bytes % 2**30 == 0, "Installed memory is not a whole number of GiB")
+    if ram_bytes % 2**30 != 0:
+        msg = "Installed memory is not a whole number of GiB"
+        raise ValueError(msg)
+    return ram_bytes
+
+
+def setup(image_id: str, gpu: dict[str, str]) -> Setup:
+    """Collect the served identity, launch recipe and host facts.
+
+    Returns:
+        The shared payload inputs.
+
+    Raises:
+        ValueError: If the engine, target, launch recipe or board memory differ
+            from what the payloads record.
+
+    """
+    manifest = mapping(loads(MANIFEST.read_bytes()))
+    sources = mapping(manifest.get("source_revisions"))
+    target = mapping(sources.get("target"))
+    draft = mapping(sources.get("draft"))
+    engine = text(manifest.get("engine_revision"))
+    if engine not in ENGINE_VERSIONS:
+        msg = f"No recorded ExLlamaV3 version for {engine}"
+        raise ValueError(msg)
+    target_repository = text(target.get("repository"))
+    if not target_repository.endswith("-" + QUANTIZATION):
+        msg = f"The target is not an {QUANTIZATION} repository"
+        raise ValueError(msg)
+    recipe = " ".join(
+        ENTRYPOINT.read_text(encoding="utf-8").replace("\\\n", " ").split()
+    )
+    if f"exec {COMMAND}" not in recipe:
+        msg = "serve/exl3-entrypoint.sh no longer launches the recorded command"
+        raise ValueError(msg)
+    patches = patch_count()
+    cpu = cpu_model()
+    pretty = os_pretty_name()
+    ram_bytes = installed_memory_bytes()
     memory_total = int(gpu["memory.total"])
-    require(memory_total % 1024 == 0, "Board memory is not a whole number of GiB")
+    if memory_total % 1024 != 0:
+        msg = "Board memory is not a whole number of GiB"
+        raise ValueError(msg)
     return Setup(
         target_repository=target_repository,
         target_revision=text(target.get("revision")),
@@ -536,51 +717,61 @@ def setup(image_id: str, gpu: dict[str, str]) -> Setup:
 
 
 def notes(prompt: Prompt, pairs: list[Pair], chosen: Pair, shared: Setup) -> str:
-    """Method and setup in LocalMaxxing's 2000-character notes field.
+    """Compose the method and setup for LocalMaxxing's 2000-character notes field.
 
     Returns:
         The notes text.
 
+    Raises:
+        ValueError: If the notes exceed 2000 characters.
+
     """
     rates = sorted(pair.tok_s_out for pair in pairs)
     value = (
-        f"Stock GPU: {shared.power_limit_watts:.0f} W power limit (the card's default), "
-        "core and memory clock offsets 0; custom quiet fan curve. Isolated server "
-        "container, no other GPU work. Qwen3.8-27B as r0b0tlab EXL3 4.00 bpw "
-        f"@{shared.target_revision[:8]} at native context 262,144 with a 3-bit KV cache "
-        "(270,336 tokens preallocated; peak VRAM includes it). Draft: r0b0tlab DFlash2 "
-        f"EXL3 4.00 bpw @{shared.draft_revision[:8]}. ExLlamaV3 "
+        f"Stock GPU: {shared.power_limit_watts:.0f} W power limit (the card's "
+        "default), core and memory clock offsets 0; custom quiet fan curve. Isolated "
+        "server container, no other GPU work. Qwen3.8-27B as r0b0tlab EXL3 4.00 bpw "
+        f"@{shared.target_revision[:8]} at native context 262,144 with a 3-bit KV "
+        "cache (270,336 tokens preallocated; peak VRAM includes it). Draft: r0b0tlab "
+        f"DFlash2 EXL3 4.00 bpw @{shared.draft_revision[:8]}. ExLlamaV3 "
         f"{shared.engine_revision[:7]} (r0b0tlab community, native DFlash2) + "
         f"{shared.patches} patches: 8-row dynamic token-tree verification (anchor + 7 "
         "nodes), acceptance proved in Bend; greedy output identical with all drafts "
-        f"rejected. Method: canonical {prompt.identifier} with a leading cache-bust nonce "
-        f"line, served chat template (thinking on), temperature 0, max_tokens "
+        f"rejected. Method: canonical {prompt.identifier} with a leading cache-bust "
+        "nonce line, served chat template (thinking on), temperature 0, max_tokens "
         f"{MAX_TOKENS}, batch 1. One excluded warmup, then {len(pairs)} timed pairs (a "
         "1-token request, then the full request; each its own nonce). SSE is buffered, "
         "so TTFT = wall time of the paired 1-token request (prefill + the first verify "
-        "round). tokSOut = (outputTokens - 1) "
-        "/ (full wall - TTFT); tokSPrefill = prompt tokens of the 1-token request / TTFT "
-        "(includes HTTP and the first token); tokSTotal = (prompt + output tokens) / full "
-        f"wall. Reported: the median-tokSOut pair; tokSOut over {len(pairs)} pairs "
+        "round). tokSOut = (outputTokens - 1) / (full wall - TTFT); tokSPrefill = "
+        "prompt tokens of the 1-token request / TTFT (includes HTTP and the first "
+        "token); tokSTotal = (prompt + output tokens) / full wall. Reported: the "
+        f"median-tokSOut pair; tokSOut over {len(pairs)} pairs "
         f"{rates[0]:.1f}-{rates[-1]:.1f}; whole request including prefill "
         f"{chosen.tok_s_request:.1f} tok/s. Spec counts: the server's per-request "
-        f"counters; {DRAFT_PROPOSALS} drafted tokens per verify round. Power: nvidia-smi "
-        f"power.draw every {POWER_INTERVAL_SECONDS} s, integrated over the timed full "
-        "requests."
+        f"counters; {DRAFT_PROPOSALS} drafted tokens per verify round. Power: "
+        f"nvidia-smi power.draw every {POWER_INTERVAL_SECONDS} s, integrated over the "
+        "timed full requests."
     )
-    require(len(value) <= NOTES_LIMIT, "Notes exceed LocalMaxxing's 2000 characters")
+    if not (len(value) <= NOTES_LIMIT):
+        msg = "Notes exceed LocalMaxxing's 2000 characters"
+        raise ValueError(msg)
     return value
 
 
 def timings(pairs: list[Pair], chosen: int) -> dict[str, object]:
-    """Server usage objects verbatim plus client walls, within 8192 bytes.
+    """Collect server usage objects verbatim plus client walls, within 8192 bytes.
 
     Returns:
         The engineTimingsRaw object.
 
+    Raises:
+        ValueError: If the canonical object exceeds 8192 bytes.
+
     """
     value: dict[str, object] = {
-        "source": "elpis exl3_server usage objects (verbatim) and client monotonic walls",
+        "source": (
+            "elpis exl3_server usage objects (verbatim) and client monotonic walls"
+        ),
         "reported_pair": chosen,
         "pairs": [
             {
@@ -598,16 +789,16 @@ def timings(pairs: list[Pair], chosen: int) -> dict[str, object]:
             for pair in pairs
         ],
     }
-    require(
-        len(canonical(value)) <= TIMINGS_LIMIT, "engineTimingsRaw exceeds 8192 bytes"
-    )
+    if not (len(canonical(value)) <= TIMINGS_LIMIT):
+        msg = "engineTimingsRaw exceeds 8192 bytes"
+        raise ValueError(msg)
     return value
 
 
 def payload(
     prompt: Prompt, pairs: list[Pair], watts: float, peak_mib: int, shared: Setup
 ) -> dict[str, object]:
-    """One POST /api/speed-tests body for the median pair; no credentials.
+    """Build one POST /api/speed-tests body for the median pair; no credentials.
 
     Returns:
         The payload.
@@ -679,85 +870,140 @@ def payload(
     }
 
 
+def connect(api_key_file: Path) -> Client:
+    """Open the endpoint client and check it serves only the recorded model.
+
+    Args:
+        api_key_file: File holding the endpoint API key.
+
+    Returns:
+        The checked client.
+
+    Raises:
+        ValueError: If the endpoint is unhealthy or serves another model.
+
+    """
+    client = Client(api_key_file.read_text(encoding="utf-8").strip())
+    health = client.json("GET", "/health", None)
+    if health != {"status": "ok"}:
+        msg = "Endpoint is not healthy"
+        raise ValueError(msg)
+    served = sequence(client.json("GET", "/v1/models", None)["data"])
+    names = [text(mapping(item)["id"]) for item in served]
+    if names != [MODEL]:
+        msg = f"Endpoint must serve only {MODEL}"
+        raise ValueError(msg)
+    return client
+
+
+def prompt_results(
+    prompt: Prompt,
+    result: tuple[Reply, list[Pair]],
+    sampler: PowerSampler,
+    shared: Setup,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Build one prompt's record entry and summary entry.
+
+    Args:
+        prompt: The measured prompt.
+        result: The prompt's warmup reply and timed pairs.
+        sampler: The power sampler that ran over the measurement.
+        shared: The shared payload inputs.
+
+    Returns:
+        The record entry and the summary entry.
+
+    """
+    warmup, pairs = result
+    watts = pooled_watts(sampler, pairs)
+    peak = max(
+        [warmup.vram_mib]
+        + [reply.vram_mib for pair in pairs for reply in (pair.probe, pair.full)]
+    )
+    body = payload(prompt, pairs, watts, peak, shared)
+    index = median_index(pairs)
+    measured: dict[str, object] = {
+        "sha256": prompt.sha256,
+        "warmup": warmup.record(),
+        "pairs": [
+            {
+                "ttft_request": pair.probe.record(),
+                "full_request": pair.full.record(),
+                "ttft_seconds": pair.ttft_seconds,
+                "tok_s_out": pair.tok_s_out,
+                "tok_s_prefill": pair.tok_s_prefill,
+                "tok_s_total": pair.tok_s_total,
+                "tok_s_request": pair.tok_s_request,
+            }
+            for pair in pairs
+        ],
+        "reported_pair": index,
+        "mean_watts_full_requests": watts,
+        "peak_vram_mib": peak,
+        "payload": body,
+    }
+    rates = [pair.tok_s_out for pair in pairs]
+    summary: dict[str, object] = {
+        "tokSOut": body["tokSOut"],
+        "tokSOut_min_max": [round(min(rates), 1), round(max(rates), 1)],
+        "ttftMs": body["ttftMs"],
+        "tokSPrefill": body["tokSPrefill"],
+        "tokSTotal": body["tokSTotal"],
+        "whole_request_tok_s": round(pairs[index].tok_s_request, 1),
+        "accepted_length": round(
+            pairs[index].full.committed / pairs[index].full.rounds, 3
+        ),
+        "outputTokens": body["outputTokens"],
+        "promptTokens": body["promptTokens"],
+        "watts": round(watts, 1),
+        "peakVramGb": body["peakVramGb"],
+    }
+    return measured, summary
+
+
 def main() -> None:
-    """Measure once and write one exclusive-create JSON record with the payloads."""
+    """Measure once and write one exclusive-create JSON record with the payloads.
+
+    Raises:
+        ValueError: If the record exists, the GPU is not in its stock declared
+            state or a LocalMaxxing GPU, or its policy changed while measuring.
+
+    """
     arguments = parse_arguments()
-    require(not arguments.out.exists(), "Output record already exists")
+    if arguments.out.exists():
+        msg = "Output record already exists"
+        raise ValueError(msg)
     prompts, gpu_names = catalog(arguments.context)
     declared = _gpu()
     before = query(STATE_FIELDS)
-    require(
-        before["power.limit"] == before["power.default_limit"],
-        "The power limit differs from the card's default (not stock)",
-    )
-    require(
+    if before["power.limit"] != before["power.default_limit"]:
+        msg = "The power limit differs from the card's default (not stock)"
+        raise ValueError(msg)
+    if not (
         declared["core_clock_offset_mhz"] == 0
-        and declared["memory_clock_offset_mhz"] == 0,
-        "Clock offsets are not stock",
-    )
-    require(
-        before["name"] in gpu_names, f"{before['name']} is not a LocalMaxxing GPU name"
-    )
+        and declared["memory_clock_offset_mhz"] == 0
+    ):
+        msg = "Clock offsets are not stock"
+        raise ValueError(msg)
+    if before["name"] not in gpu_names:
+        msg = f"{before['name']} is not a LocalMaxxing GPU name"
+        raise ValueError(msg)
     shared = setup(arguments.image_id, before)
-    client = Client(arguments.api_key_file.read_text(encoding="utf-8").strip())
-    health = client.json("GET", "/health", None)
-    require(health == {"status": "ok"}, "Endpoint is not healthy")
-    served = sequence(client.json("GET", "/v1/models", None)["data"])
-    names = [text(mapping(item)["id"]) for item in served]
-    require(names == [MODEL], f"Endpoint must serve only {MODEL}")
+    client = connect(arguments.api_key_file)
     results: dict[str, tuple[Reply, list[Pair]]] = {}
     with PowerSampler(gpu=GPU, interval_seconds=POWER_INTERVAL_SECONDS) as sampler:
         for prompt in prompts:
             results[prompt.identifier] = measure(client, prompt)
     after = query(STATE_FIELDS)
-    require(_gpu() == declared, "The GPU policy changed during the measurement")
+    if _gpu() != declared:
+        msg = "The GPU policy changed during the measurement"
+        raise ValueError(msg)
     measured: dict[str, object] = {}
     summary: dict[str, object] = {}
     for prompt in prompts:
-        warmup, pairs = results[prompt.identifier]
-        watts = pooled_watts(sampler, pairs)
-        peak = max(
-            [warmup.vram_mib]
-            + [reply.vram_mib for pair in pairs for reply in (pair.probe, pair.full)]
+        measured[prompt.identifier], summary[prompt.identifier] = prompt_results(
+            prompt, results[prompt.identifier], sampler, shared
         )
-        body = payload(prompt, pairs, watts, peak, shared)
-        index = median_index(pairs)
-        measured[prompt.identifier] = {
-            "sha256": prompt.sha256,
-            "warmup": warmup.record(),
-            "pairs": [
-                {
-                    "ttft_request": pair.probe.record(),
-                    "full_request": pair.full.record(),
-                    "ttft_seconds": pair.ttft_seconds,
-                    "tok_s_out": pair.tok_s_out,
-                    "tok_s_prefill": pair.tok_s_prefill,
-                    "tok_s_total": pair.tok_s_total,
-                    "tok_s_request": pair.tok_s_request,
-                }
-                for pair in pairs
-            ],
-            "reported_pair": index,
-            "mean_watts_full_requests": watts,
-            "peak_vram_mib": peak,
-            "payload": body,
-        }
-        rates = [pair.tok_s_out for pair in pairs]
-        summary[prompt.identifier] = {
-            "tokSOut": body["tokSOut"],
-            "tokSOut_min_max": [round(min(rates), 1), round(max(rates), 1)],
-            "ttftMs": body["ttftMs"],
-            "tokSPrefill": body["tokSPrefill"],
-            "tokSTotal": body["tokSTotal"],
-            "whole_request_tok_s": round(pairs[index].tok_s_request, 1),
-            "accepted_length": round(
-                pairs[index].full.committed / pairs[index].full.rounds, 3
-            ),
-            "outputTokens": body["outputTokens"],
-            "promptTokens": body["promptTokens"],
-            "watts": round(watts, 1),
-            "peakVramGb": body["peakVramGb"],
-        }
     record = {
         "schema_version": 1,
         "producer": "bench.localmaxxing",

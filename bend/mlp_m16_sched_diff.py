@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""
-Differential check of the ext 8201 fused-MLP schedule header: runs the Bend emitter
-bend/MLP_M16_SCHED_TABLE.bend (Nat model bend/mlp_m16_sched.bend) and the independent Python
-reference gen_table.py, compares their stdout byte for byte and prints the sha256 of the header.
-Exit status 0 iff IDENTICAL. This is differential evidence for the one instance the kernel bakes
-(G = 164, PF = 8, gate/up 5120 x 17408, down 17408 x 5120); the laws are in
-bend/mlp_m16_sched_laws.bend.
+# Copyright (c) 2026 Gil Rodrigues
+"""Differential check of the ext 8201 fused-MLP schedule header.
+
+Runs the Bend emitter bend/MLP_M16_SCHED_TABLE.bend (Nat model
+bend/mlp_m16_sched.bend) and the independent Python reference gen_table.py,
+compares their stdout byte for byte and prints the sha256 of the header.
+Exit status 0 iff IDENTICAL. This is differential evidence for the one
+instance the kernel bakes (G = 164, PF = 8, gate/up 5120 x 17408, down
+17408 x 5120); the laws are in bend/mlp_m16_sched_laws.bend.
 
 Usage: python3 -B bend/mlp_m16_sched_diff.py [GEN_TABLE_PY] [--out HEADER]
-  GEN_TABLE_PY: the independent Python reference (default: the tracked bend/gen/mlp_m16_sched_ref.py).
+  GEN_TABLE_PY: the independent Python reference (default: the tracked
+  bend/gen/mlp_m16_sched_ref.py).
 """
 
 from __future__ import annotations
@@ -18,28 +21,59 @@ import hashlib
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import source_link  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import source_link
 
 REPO = source_link.REPO
 TABLE = "bend/MLP_M16_SCHED_TABLE.bend"
 DEFAULT_REFERENCE = REPO / "bend/gen/mlp_m16_sched_ref.py"
 
 
-def fail(msg: str) -> None:
-    raise SystemExit(f"mlp_m16_sched_diff: {msg}")
+def fail(msg: str) -> NoReturn:
+    """Stop with a prefixed error message.
+
+    Args:
+        msg: The reason.
+
+    Raises:
+        SystemExit: Always.
+
+    """
+    text = f"mlp_m16_sched_diff: {msg}"
+    raise SystemExit(text)
 
 
 def run(cmd: list[str]) -> bytes:
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, timeout=1800)
+    """Run cmd in the repository and return its stdout; stop if it fails.
+
+    Args:
+        cmd: The argv to run.
+
+    Returns:
+        The captured stdout.
+
+    """
+    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, timeout=1800, check=False)  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend table or sys.executable reference script, no shell
     if proc.returncode != 0:
-        fail(f"{' '.join(cmd)} exited {proc.returncode}: {proc.stderr.decode(errors='replace')}")
+        fail(
+            f"{' '.join(cmd)} exited {proc.returncode}: "
+            f"{proc.stderr.decode(errors='replace')}"
+        )
     return proc.stdout
 
 
 def main(argv: list[str]) -> int:
+    """Compare the Bend emitter's output with the Python reference.
+
+    Args:
+        argv: The command-line arguments without the program name.
+
+    Returns:
+        The exit status: 0 iff identical.
+
+    """
     out = None
     if "--out" in argv:
         i = argv.index("--out")
@@ -58,14 +92,19 @@ def main(argv: list[str]) -> int:
         fail("the Bend emitter printed nothing")
     if bend != python:
         diff = difflib.unified_diff(
-            python.decode().splitlines(True), bend.decode().splitlines(True), "gen_table.py", TABLE
+            python.decode().splitlines(keepends=True),
+            bend.decode().splitlines(keepends=True),
+            "gen_table.py",
+            TABLE,
         )
         sys.stdout.write("".join(list(diff)[:60]))
-        print("DIFFERENT")
+        sys.stdout.write("DIFFERENT\n")
         return 1
     if out is not None:
         out.write_bytes(bend)
-    print(f"IDENTICAL {len(bend)} bytes sha256 {hashlib.sha256(bend).hexdigest()}")
+    sys.stdout.write(
+        f"IDENTICAL {len(bend)} bytes sha256 {hashlib.sha256(bend).hexdigest()}\n"
+    )
     return 0
 
 

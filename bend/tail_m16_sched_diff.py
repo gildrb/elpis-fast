@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""
-Differential check of the ext 8202 layer-tail schedule header: runs the Bend emitter
-bend/TAIL_M16_SCHED_TABLE.bend (Nat model bend/tail_m16_sched.bend) and compares its stdout byte for
-byte with the header exllamav3_ext/quant/exl3_tail_m16_sched.h that the committed extension patch
-patches/exl3-ext/8202-layer-tail-on2102.patch adds (the header the kernel is built with). Prints the
-sha256 of the patch and of the header. Exit status 0 iff IDENTICAL. This is differential evidence
-for the one instance the kernel bakes (G = 164, PF = 8, o_proj 6144 x 5120, 8201's gate/up
-5120 x 17408 for ring2); the laws are in bend/tail_m16_sched_laws.bend.
+# Copyright (c) 2026 Gil Rodrigues
+"""Differential check of the ext 8202 layer-tail schedule header.
+
+Runs the Bend emitter bend/TAIL_M16_SCHED_TABLE.bend (Nat model
+bend/tail_m16_sched.bend) and compares its stdout byte for byte with the header
+exllamav3_ext/quant/exl3_tail_m16_sched.h that the committed extension patch
+patches/exl3-ext/8202-layer-tail-on2102.patch adds (the header the kernel is
+built with). Prints the sha256 of the patch and of the header. Exit status 0
+iff IDENTICAL. This is differential evidence for the one instance the kernel
+bakes (G = 164, PF = 8, o_proj 6144 x 5120, 8201's gate/up 5120 x 17408 for
+ring2); the laws are in bend/tail_m16_sched_laws.bend.
 
 Usage: python3 -B bend/tail_m16_sched_diff.py [--patch PATCH] [--out HEADER]
 """
@@ -21,9 +24,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import source_link  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import source_link
 
 REPO = source_link.REPO
 TABLE = "bend/TAIL_M16_SCHED_TABLE.bend"
@@ -32,18 +34,48 @@ HEADER = "exllamav3_ext/quant/exl3_tail_m16_sched.h"
 
 
 def fail(msg: str) -> NoReturn:
-    raise SystemExit(f"tail_m16_sched_diff: {msg}")
+    """Stop with a prefixed error message.
+
+    Args:
+        msg: The reason.
+
+    Raises:
+        SystemExit: Always.
+
+    """
+    text = f"tail_m16_sched_diff: {msg}"
+    raise SystemExit(text)
 
 
 def run(cmd: list[str]) -> bytes:
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, timeout=1800, check=False)
+    """Run cmd in the repository and return its stdout; stop if it fails.
+
+    Args:
+        cmd: The argv to run.
+
+    Returns:
+        The captured stdout.
+
+    """
+    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, timeout=1800, check=False)  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend table or sys.executable reference script, no shell
     if proc.returncode != 0:
-        fail(f"{' '.join(cmd)} exited {proc.returncode}: {proc.stderr.decode(errors='replace')}")
+        fail(
+            f"{' '.join(cmd)} exited {proc.returncode}: "
+            f"{proc.stderr.decode(errors='replace')}"
+        )
     return proc.stdout
 
 
 def patch_header(patch: bytes) -> bytes:
-    """The new-file body of HEADER in the unified diff, exactly as the patch creates it."""
+    """Return the new-file body of HEADER in the unified diff, as the patch creates it.
+
+    Args:
+        patch: The unified diff.
+
+    Returns:
+        The header bytes.
+
+    """
     lines = patch.split(b"\n")
     target = f"+++ b/{HEADER}".encode()
     starts = [i for i, line in enumerate(lines) if line == target]
@@ -65,6 +97,16 @@ def patch_header(patch: bytes) -> bytes:
 
 
 def take_opt(argv: list[str], key: str) -> tuple[list[str], Path | None]:
+    """Remove the option key and its path argument from argv.
+
+    Args:
+        argv: The arguments.
+        key: The option name.
+
+    Returns:
+        The remaining arguments and the option's path, or None if absent.
+
+    """
     if key not in argv:
         return argv, None
     i = argv.index(key)
@@ -74,6 +116,15 @@ def take_opt(argv: list[str], key: str) -> tuple[list[str], Path | None]:
 
 
 def main(argv: list[str]) -> int:
+    """Compare the Bend emitter's output with the header the patch adds.
+
+    Args:
+        argv: The command-line arguments without the program name.
+
+    Returns:
+        The exit status: 0 iff identical.
+
+    """
     argv, out = take_opt(argv, "--out")
     argv, patch_arg = take_opt(argv, "--patch")
     if argv:
@@ -86,17 +137,22 @@ def main(argv: list[str]) -> int:
     bend = run(source_link.locked([source_link.bend(), TABLE]))
     if not bend:
         fail("the Bend emitter printed nothing")
-    print(f"patch {patch_path} sha256 {hashlib.sha256(patch).hexdigest()}")
+    sys.stdout.write(f"patch {patch_path} sha256 {hashlib.sha256(patch).hexdigest()}\n")
     if bend != expected:
         diff = difflib.unified_diff(
-            expected.decode().splitlines(True), bend.decode().splitlines(True), f"{PATCH}:{HEADER}", TABLE
+            expected.decode().splitlines(keepends=True),
+            bend.decode().splitlines(keepends=True),
+            f"{PATCH}:{HEADER}",
+            TABLE,
         )
         _ = sys.stdout.write("".join(list(diff)[:60]))
-        print("DIFFERENT")
+        sys.stdout.write("DIFFERENT\n")
         return 1
     if out is not None:
         _ = out.write_bytes(bend)
-    print(f"IDENTICAL {len(bend)} bytes sha256 {hashlib.sha256(bend).hexdigest()}")
+    sys.stdout.write(
+        f"IDENTICAL {len(bend)} bytes sha256 {hashlib.sha256(bend).hexdigest()}\n"
+    )
     return 0
 
 

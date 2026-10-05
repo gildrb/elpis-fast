@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Gil Rodrigues
 """Rebuild the pinned exllamav3_ext CUDA extension and record it, fail closed.
 
 Run at image build time by Dockerfile.exl3 from a copy of the repository's
@@ -59,18 +61,21 @@ from patches.exl3.apply import (
     apply_file,
     check_acceptor,
     check_files,
+    check_post_images,
+    check_pre_images,
     check_series,
     digest,
     fail,
     parse_patch,
     pinned,
-    require,
     safe_relative,
     text_value,
 )
 
 EXT_DIR = Path(__file__).resolve().parent
 EXL3_DIR = EXT_DIR.parent / "exl3"
+PIN_ARGC = 3
+STEP_ARGC = 4
 KEYS = {
     "schema",
     "source",
@@ -91,6 +96,7 @@ def mapping(value: object, label: str) -> dict[str, object]:
 
     Returns:
         The validated object.
+
     """
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         fail(f"{label} is not an object")
@@ -102,14 +108,15 @@ def load() -> dict[str, object]:
 
     Returns:
         The manifest.
+
     """
     manifest = mapping(json.loads((EXT_DIR / "exl3-ext.json").read_bytes()), "manifest")
-    require(set(manifest) == KEYS, "bad extension manifest keys")
-    require(manifest["schema"] == 1, "unsupported extension manifest schema")
-    require(
-        set(mapping(manifest["source"], "source")) == SOURCE_KEYS,
-        "bad extension source record",
-    )
+    if set(manifest) != KEYS:
+        fail("bad extension manifest keys")
+    if manifest["schema"] != 1:
+        fail("unsupported extension manifest schema")
+    if set(mapping(manifest["source"], "source")) != SOURCE_KEYS:
+        fail("bad extension source record")
     return manifest
 
 
@@ -118,16 +125,19 @@ def tree_digest(root: Path) -> str:
 
     Returns:
         The lowercase hex SHA-256 of the listing.
+
     """
     lines: list[str] = []
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
         if "__pycache__" in relative.parts:
             continue
-        require(not path.is_symlink(), f"symlink in source tree: {relative}")
+        if path.is_symlink():
+            fail(f"symlink in source tree: {relative}")
         if path.is_file():
             lines.append(f"{digest(path)}  {relative.as_posix()}\n")
-    require(bool(lines), f"empty source tree {root}")
+    if not lines:
+        fail(f"empty source tree {root}")
     return hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
@@ -136,13 +146,16 @@ def base_extension(extension: dict[str, object]) -> tuple[Path, str]:
 
     Returns:
         The extension path and its recorded sha256.
+
     """
     path = text_value(extension["path"], "extension path")
     source = Path(text_value(extension["base_record"], "base record"))
     record = mapping(json.loads(source.read_bytes()), "base record")
-    require(record.get("schema") == 1, "unsupported base record schema")
+    if record.get("schema") != 1:
+        fail("unsupported base record schema")
     recorded = mapping(record.get("per_build"), "base per-build record")
-    require(path in recorded, "the base record does not name the extension")
+    if path not in recorded:
+        fail("the base record does not name the extension")
     return Path(path), pinned(recorded[path], "recorded base extension sha256")
 
 
@@ -151,15 +164,16 @@ def engine_root(source: dict[str, object]) -> Path:
 
     Returns:
         The engine package root.
+
     """
     root = Path(text_value(source["root"], "source root"))
     spec = importlib.util.find_spec("exllamav3")
-    require(
+    if not (
         spec is not None
         and spec.origin is not None
-        and Path(spec.origin).parent == root,
-        "installed engine root differs from the extension manifest",
-    )
+        and Path(spec.origin).parent == root
+    ):
+        fail("installed engine root differs from the extension manifest")
     return root
 
 
@@ -168,22 +182,19 @@ def series(manifest: dict[str, object]) -> list[tuple[str, str]]:
 
     Returns:
         (patch name, sha256) in application order.
+
     """
     path = EXT_DIR / "series"
-    require(
-        digest(path) == pinned(manifest["series_sha256"], "series_sha256"),
-        "extension series hash mismatch",
-    )
+    if digest(path) != pinned(manifest["series_sha256"], "series_sha256"):
+        fail("extension series hash mismatch")
     entries: list[tuple[str, str]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         match = SERIES_LINE.match(line)
         if match is None:
             fail(f"malformed extension series line {line!r}")
         entries.append((match.group(2), match.group(1)))
-    require(
-        manifest["patches"] == [{"name": n, "sha256": s} for n, s in entries],
-        "extension series differs from the manifest",
-    )
+    if manifest["patches"] != [{"name": n, "sha256": s} for n, s in entries]:
+        fail("extension series differs from the manifest")
     return entries
 
 
@@ -194,40 +205,39 @@ def apply_pinned(
     root: Path,
 ) -> None:
     """Apply a pinned series in place between pre- and post-image checks."""
-    for relative, (pre, _) in pins.items():
-        if pre is None:
-            require(not (root / relative).exists(), f"{relative} exists before its patch")
-        else:
-            require(digest(root / relative) == pre, f"pre-image mismatch: {relative}")
+    check_pre_images(root, pins)
     touched: set[str] = set()
     for name, sha in entries:
         path = patch_dir / name
-        require(digest(path) == sha, f"patch hash mismatch: {name}")
+        if digest(path) != sha:
+            fail(f"patch hash mismatch: {name}")
         for relative, creates, hunks in parse_patch(path.read_text(encoding="utf-8")):
-            require(relative in pins, f"patch touches unpinned file {relative}")
-            require(
-                creates == (pins[relative][0] is None and relative not in touched),
-                f"file creation disagrees with the manifest: {relative}",
-            )
+            if relative not in pins:
+                fail(f"patch touches unpinned file {relative}")
+            if creates != (pins[relative][0] is None and relative not in touched):
+                fail(f"file creation disagrees with the manifest: {relative}")
             apply_file(root / relative, creates=creates, hunks=hunks)
             touched.add(relative)
-    require(touched == set(pins), "manifest pins files no patch touches")
-    for relative, (_, post) in pins.items():
-        require(digest(root / relative) == post, f"post-image mismatch: {relative}")
+    if touched != set(pins):
+        fail("manifest pins files no patch touches")
+    check_post_images(root, pins)
 
 
 def apply_series(manifest: dict[str, object], root: Path) -> None:
     """Apply the pinned extension series in place between image checks."""
     entries = series(manifest)
-    require(bool(entries), "patched variant needs a nonempty series")
+    if not entries:
+        fail("patched variant needs a nonempty series")
     apply_pinned(EXT_DIR, entries, check_files(manifest), root)
 
 
 def apply_engine(root: Path) -> None:
     """Apply the pinned patches/exl3 series in place, as the candidate image does."""
     engine = mapping(json.loads((EXL3_DIR / "exl3-patches.json").read_bytes()), "m")
-    require(set(engine) == MANIFEST_KEYS, "bad patches/exl3 manifest keys")
-    require(engine["schema"] == 1, "unsupported patches/exl3 manifest schema")
+    if set(engine) != MANIFEST_KEYS:
+        fail("bad patches/exl3 manifest keys")
+    if engine["schema"] != 1:
+        fail("unsupported patches/exl3 manifest schema")
     apply_pinned(EXL3_DIR, check_series(EXL3_DIR, engine), check_files(engine), root)
 
 
@@ -238,6 +248,7 @@ def engine_copy(pristine: Path, destination: Path) -> Path:
 
     Returns:
         The copy's root.
+
     """
     _ = shutil.copytree(
         pristine,
@@ -249,50 +260,70 @@ def engine_copy(pristine: Path, destination: Path) -> Path:
     return destination
 
 
-def pin(pristine: Path) -> None:
-    """Re-pin exl3-ext.json to the series file against a pristine engine package."""
-    manifest = load()
-    source = mapping(manifest["source"], "source")
-    tree = safe_relative(text_value(source["tree"], "source tree"))
-    require(
-        pristine.is_dir() and not pristine.is_symlink(),
-        f"{pristine} is not a directory",
-    )
-    require(
-        tree_digest(pristine / tree) == pinned(source["tree_sha256"], "tree_sha256"),
-        "pristine extension sources differ from the pinned upstream tree",
-    )
-    series_bytes = (EXT_DIR / "series").read_bytes()
+def series_patches(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Read each series patch and check it against its series line hash.
+
+    Args:
+        entries: (name, sha256) pairs from the series file.
+
+    Returns:
+        (name, decoded patch text) pairs in series order.
+
+    """
+    patches: list[tuple[str, str]] = []
+    for name, sha in entries:
+        text = (EXT_DIR / name).read_bytes()
+        if hashlib.sha256(text).hexdigest() != sha:
+            fail(f"series line hash differs from the patch: {name}")
+        patches.append((name, text.decode("utf-8")))
+    return patches
+
+
+def series_entries(series_bytes: bytes) -> list[tuple[str, str]]:
+    """Parse the extension series file and require nonempty, unique patch names.
+
+    Args:
+        series_bytes: Raw contents of the series file.
+
+    Returns:
+        (name, sha256) pairs in series order.
+
+    """
     entries: list[tuple[str, str]] = []
     for line in series_bytes.decode("utf-8").splitlines():
         match = SERIES_LINE.match(line)
         if match is None:
             fail(f"malformed extension series line {line!r}")
         entries.append((match.group(2), match.group(1)))
-    require(bool(entries), "the extension series is empty")
-    require(
-        len({name for name, _ in entries}) == len(entries),
-        "duplicate patch in the extension series",
-    )
-    patches: list[tuple[str, str]] = []
-    for name, sha in entries:
-        text = (EXT_DIR / name).read_bytes()
-        require(
-            hashlib.sha256(text).hexdigest() == sha,
-            f"series line hash differs from the patch: {name}",
-        )
-        patches.append((name, text.decode("utf-8")))
+    if not entries:
+        fail("the extension series is empty")
+    if len({name for name, _ in entries}) != len(entries):
+        fail("duplicate patch in the extension series")
+    return entries
+
+
+def pin(pristine: Path) -> None:
+    """Re-pin exl3-ext.json to the series file against a pristine engine package."""
+    manifest = load()
+    source = mapping(manifest["source"], "source")
+    tree = safe_relative(text_value(source["tree"], "source tree"))
+    if not (pristine.is_dir() and not pristine.is_symlink()):
+        fail(f"{pristine} is not a directory")
+    if tree_digest(pristine / tree) != pinned(source["tree_sha256"], "tree_sha256"):
+        fail("pristine extension sources differ from the pinned upstream tree")
+    series_bytes = (EXT_DIR / "series").read_bytes()
+    entries = series_entries(series_bytes)
+    patches = series_patches(entries)
     with tempfile.TemporaryDirectory(prefix="exl3-ext-pin-") as scratch:
         work = engine_copy(pristine, Path(scratch) / "pin")
         images: dict[str, str | None] = {}
         for name, text in patches:
             for relative, creates, hunks in parse_patch(text):
                 target = work / relative
-                require(not target.is_symlink(), f"{name} patches symlink {relative}")
-                require(
-                    creates != target.exists(),
-                    f"{name}: file creation disagrees with the tree: {relative}",
-                )
+                if target.is_symlink():
+                    fail(f"{name} patches symlink {relative}")
+                if creates == target.exists():
+                    fail(f"{name}: file creation disagrees with the tree: {relative}")
                 if relative not in images:
                     images[relative] = None if creates else digest(target)
                 apply_file(target, creates=creates, hunks=hunks)
@@ -313,10 +344,10 @@ def pin(pristine: Path) -> None:
     with os.fdopen(descriptor, "wb") as handle:
         _ = handle.write(document)
     _ = staged.replace(out)
-    print(
+    _ = sys.stdout.write(
         f"Pinned {len(entries)} extension patch(es) touching {len(images)} file(s); "
         f"series_sha256 {repinned['series_sha256']}; "
-        f"exl3-ext.json sha256 {hashlib.sha256(document).hexdigest()}"
+        f"exl3-ext.json sha256 {hashlib.sha256(document).hexdigest()}\n"
     )
 
 
@@ -326,24 +357,19 @@ def prepare(variant: str, build: Path) -> None:
     source = mapping(manifest["source"], "source")
     root = engine_root(source)
     tree = safe_relative(text_value(source["tree"], "source tree"))
-    require(
-        tree_digest(root / tree) == pinned(source["tree_sha256"], "tree_sha256"),
-        "installed extension sources differ from the pinned upstream tree",
-    )
+    if tree_digest(root / tree) != pinned(source["tree_sha256"], "tree_sha256"):
+        fail("installed extension sources differ from the pinned upstream tree")
     setup_py = EXT_DIR / safe_relative(text_value(source["setup_py"], "setup.py"))
-    require(
-        digest(setup_py) == pinned(source["setup_py_sha256"], "setup_py_sha256"),
-        "vendored setup.py differs from its pin",
-    )
+    if digest(setup_py) != pinned(source["setup_py_sha256"], "setup_py_sha256"):
+        fail("vendored setup.py differs from its pin")
     extension = mapping(manifest["extension"], "extension")
     so, base_sha256 = base_extension(extension)
-    require(
-        digest(so) == base_sha256,
-        "installed extension differs from the base image's recorded build",
-    )
+    if digest(so) != base_sha256:
+        fail("installed extension differs from the base image's recorded build")
     if variant == "patched":
         apply_series(manifest, root)
-    require(not build.exists(), f"{build} already exists")
+    if build.exists():
+        fail(f"{build} already exists")
     (build / "exllamav3" / tree).mkdir(parents=True)
     _ = (build / "setup.py").write_bytes(setup_py.read_bytes())
     for path in sorted((root / tree).rglob("*")):
@@ -360,7 +386,7 @@ def prepare(variant: str, build: Path) -> None:
     # base build) so the build does not depend on when prepare ran.
     for path in [build, *build.rglob("*")]:
         os.utime(path, (SOURCE_MTIME, SOURCE_MTIME), follow_symlinks=False)
-    print(f"Prepared {variant} exllamav3_ext sources at {build}")
+    _ = sys.stdout.write(f"Prepared {variant} exllamav3_ext sources at {build}\n")
 
 
 def compose(variant: str, so_sha256: str) -> bytes:
@@ -368,16 +394,17 @@ def compose(variant: str, so_sha256: str) -> bytes:
 
     Returns:
         The canonical JSON bytes.
+
     """
     manifest = load()
     source = mapping(manifest["source"], "source")
     engine = mapping(json.loads((EXL3_DIR / "exl3-patches.json").read_bytes()), "m")
-    require(set(engine) == MANIFEST_KEYS, "bad patches/exl3 manifest keys")
-    require(engine["schema"] == 1, "unsupported patches/exl3 manifest schema")
-    require(
-        mapping(engine["engine"], "engine")["root"] == source["root"],
-        "extension and engine manifests name different package roots",
-    )
+    if set(engine) != MANIFEST_KEYS:
+        fail("bad patches/exl3 manifest keys")
+    if engine["schema"] != 1:
+        fail("unsupported patches/exl3 manifest schema")
+    if mapping(engine["engine"], "engine")["root"] != source["root"]:
+        fail("extension and engine manifests name different package roots")
     files = {
         name: mapping(record, name)
         for name, record in mapping(engine["files"], "files").items()
@@ -400,10 +427,8 @@ def compose(variant: str, so_sha256: str) -> bytes:
         _ = series(manifest)
         for name, (pre, post) in check_files(manifest).items():
             earlier = files.get(name)
-            require(
-                earlier is None or earlier["post"] == pre,
-                f"extension pre-image of {name} is not the engine post-image",
-            )
+            if not (earlier is None or earlier["post"] == pre):
+                fail(f"extension pre-image of {name} is not the engine post-image")
             files[name] = {
                 "pre": pre if earlier is None else earlier["pre"],
                 "post": post,
@@ -420,39 +445,36 @@ def record(variant: str, out: Path) -> None:
     extension = mapping(load()["extension"], "extension")
     so = Path(text_value(extension["path"], "extension path"))
     document = compose(variant, digest(so))
-    require(
-        out.read_bytes() == (EXL3_DIR / "exl3-patches.json").read_bytes(),
-        "installed engine manifest is not the patches/exl3 manifest",
-    )
+    if out.read_bytes() != (EXL3_DIR / "exl3-patches.json").read_bytes():
+        fail("installed engine manifest is not the patches/exl3 manifest")
     parsed = mapping(json.loads(document), "document")
     root = Path(text_value(mapping(parsed["engine"], "engine")["root"], "root"))
     for name, value in mapping(parsed["files"], "files").items():
-        require(
-            digest(root / safe_relative(name)) == mapping(value, name)["post"],
-            f"installed engine file differs from its post-image: {name}",
-        )
+        if digest(root / safe_relative(name)) != mapping(value, name)["post"]:
+            fail(f"installed engine file differs from its post-image: {name}")
     check_acceptor(parsed["acceptor"])
     out.unlink()
     _ = out.write_bytes(document)
     out.chmod(0o444)
-    print(
+    _ = sys.stdout.write(
         f"Recorded {variant} extension {digest(so)}; "
-        f"manifest sha256 {hashlib.sha256(document).hexdigest()}"
+        f"manifest sha256 {hashlib.sha256(document).hexdigest()}\n"
     )
 
 
 def main(argv: list[str]) -> None:
     """Dispatch one build-time step, or re-pin the manifest on the host."""
-    if len(argv) == 3 and argv[1] == "pin":
+    if len(argv) == PIN_ARGC and argv[1] == "pin":
         pin(Path(argv[2]))
         return
-    if len(argv) != 4 or argv[1] not in {"prepare", "compose", "record"}:
+    if len(argv) != STEP_ARGC or argv[1] not in {"prepare", "compose", "record"}:
         fail(
             "usage: ext.py <prepare|compose|record> <rebuilt|patched> <path>"
             " | ext.py pin <pristine-engine-root>"
         )
     command, variant, path = argv[1], argv[2], Path(argv[3])
-    require(variant in VARIANTS, f"unknown extension variant {variant!r}")
+    if variant not in VARIANTS:
+        fail(f"unknown extension variant {variant!r}")
     if command == "prepare":
         prepare(variant, path)
     elif command == "compose":

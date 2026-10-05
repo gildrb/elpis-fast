@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Gil Rodrigues
 """Content identity of the EXL3 base image, fail closed.
 
 Runs in the image build with the venv's interpreter, and later inside the image:
@@ -56,17 +57,22 @@ PER_BUILD = (
     DIST / "RECORD",
 )
 DPKG_STATUS = Path("/var/lib/dpkg/status")
+INPUTS_ARGC = 5
+COMMAND_ARGC = 3
 
 
 def fail(message: str) -> NoReturn:
-    """Stop with an error."""
-    raise SystemExit(f"manifest.py: {message}")
+    """Stop with an error.
 
+    Args:
+        message: Error text, printed after the ``manifest.py:`` prefix.
 
-def require(condition: bool, message: str) -> None:
-    """Stop unless the condition holds."""
-    if not condition:
-        fail(message)
+    Raises:
+        SystemExit: Always.
+
+    """
+    msg = f"manifest.py: {message}"
+    raise SystemExit(msg)
 
 
 def digest(path: Path) -> str:
@@ -74,6 +80,7 @@ def digest(path: Path) -> str:
 
     Returns:
         The lowercase hex sha256.
+
     """
     sha = hashlib.sha256()
     with path.open("rb") as handle:
@@ -87,6 +94,7 @@ def packages() -> list[str]:
 
     Returns:
         Sorted `p <package>=<version>` lines.
+
     """
     lines: list[str] = []
     for stanza in DPKG_STATUS.read_text(encoding="utf-8").split("\n\n"):
@@ -97,7 +105,8 @@ def packages() -> list[str]:
                 fields[key] = value.strip()
         if fields.get("Status") == "install ok installed":
             lines.append(f"p {fields['Package']}={fields['Version']}\n")
-    require(bool(lines), "no installed Debian packages")
+    if not lines:
+        fail("no installed Debian packages")
     return sorted(lines)
 
 
@@ -106,25 +115,24 @@ def files() -> list[str]:
 
     Returns:
         Sorted `f` and `l` lines.
+
     """
     lines: list[str] = []
     for root in ROOTS:
-        require(root.is_dir() and not root.is_symlink(), f"{root} is not a directory")
+        if not (root.is_dir() and not root.is_symlink()):
+            fail(f"{root} is not a directory")
         for directory, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(dirnames)
             for name in [*filenames, *dirnames]:
                 path = Path(directory) / name
                 info = path.lstat()
                 if stat.S_ISLNK(info.st_mode):
-                    lines.append(f"l {os.readlink(path)} {path}\n")
+                    lines.append(f"l {os.readlink(path)} {path}\n")  # ruff: ignore[os-readlink]  records the raw link text in the manifest
                 elif stat.S_ISREG(info.st_mode) and path not in PER_BUILD:
                     mode = stat.S_IMODE(info.st_mode)
                     lines.append(f"f {digest(path)} {mode:04o} {path}\n")
-                else:
-                    require(
-                        stat.S_ISDIR(info.st_mode) or path in PER_BUILD,
-                        f"unexpected file type: {path}",
-                    )
+                elif not (stat.S_ISDIR(info.st_mode) or path in PER_BUILD):
+                    fail(f"unexpected file type: {path}")
     return sorted(lines)
 
 
@@ -133,6 +141,7 @@ def listing() -> bytes:
 
     Returns:
         The listing bytes.
+
     """
     return "".join(packages() + files()).encode()
 
@@ -142,9 +151,11 @@ def record() -> dict[str, object]:
 
     Returns:
         The content sha256 and the per-build hashes.
+
     """
     for path in PER_BUILD:
-        require(path.is_file() and not path.is_symlink(), f"missing {path}")
+        if not (path.is_file() and not path.is_symlink()):
+            fail(f"missing {path}")
     return {
         "schema": 1,
         "content_sha256": hashlib.sha256(listing()).hexdigest(),
@@ -157,6 +168,7 @@ def encode(document: dict[str, object]) -> bytes:
 
     Returns:
         The JSON bytes.
+
     """
     return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode()
 
@@ -166,6 +178,7 @@ def record_line(path: Path) -> str:
 
     Returns:
         `<path>,sha256=<urlsafe base64>,<size>`.
+
     """
     data = path.read_bytes()
     sha = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=")
@@ -177,7 +190,8 @@ def drop_cache(dist: Path) -> None:
     name = f"{dist.name}/uv_cache.json"
     lines = dist.joinpath("RECORD").read_text(encoding="utf-8").splitlines()
     kept = [line for line in lines if line.split(",", 1)[0] != name]
-    require(len(kept) == len(lines) - 1, f"RECORD of {dist.name} lacks uv_cache.json")
+    if len(kept) != len(lines) - 1:
+        fail(f"RECORD of {dist.name} lacks uv_cache.json")
     dist.joinpath("uv_cache.json").unlink()
     _ = dist.joinpath("RECORD").write_text("".join(f"{line}\n" for line in kept))
 
@@ -186,27 +200,26 @@ def normalise(sources: Path) -> None:
     """Remove install times, bytecode and the exllamav3 build path."""
     for root in ROOTS:
         for cache in sorted(root.rglob("__pycache__")):
-            require(cache.is_dir() and not cache.is_symlink(), f"bad {cache}")
+            if not (cache.is_dir() and not cache.is_symlink()):
+                fail(f"bad {cache}")
             shutil.rmtree(cache)
     caches = sorted(SITE.glob("*.dist-info/uv_cache.json"))
-    require(
-        len(caches) == len(list(SITE.glob("*.dist-info"))),
-        "a distribution lacks uv_cache.json",
-    )
+    if len(caches) != len(list(SITE.glob("*.dist-info"))):
+        fail("a distribution lacks uv_cache.json")
     for cache in caches:
         drop_cache(cache.parent)
     archive = json.loads(sources.read_bytes())["archives"]["exllamav3"]
     url, sha = archive["url"], archive["sha256"]
-    require(
-        isinstance(url, str) and url.startswith("https://") and isinstance(sha, str),
-        "bad exllamav3 archive record",
-    )
+    if not (
+        isinstance(url, str) and url.startswith("https://") and isinstance(sha, str)
+    ):
+        fail("bad exllamav3 archive record")
     direct = DIST / "direct_url.json"
-    require(
-        json.loads(direct.read_bytes())
-        == {"url": "file:///src/exllamav3", "dir_info": {}},
-        "exllamav3 was not installed from /src/exllamav3",
-    )
+    if json.loads(direct.read_bytes()) != {
+        "url": "file:///src/exllamav3",
+        "dir_info": {},
+    }:
+        fail("exllamav3 was not installed from /src/exllamav3")
     _ = direct.write_text(
         json.dumps(
             {"archive_info": {"hashes": {"sha256": sha}}, "url": url},
@@ -219,7 +232,8 @@ def normalise(sources: Path) -> None:
     updated = [
         record_line(direct) if line.split(",", 1)[0] == name else line for line in lines
     ]
-    require(updated != lines, "RECORD does not list direct_url.json")
+    if updated == lines:
+        fail("RECORD does not list direct_url.json")
     _ = DIST.joinpath("RECORD").write_text("".join(f"{line}\n" for line in updated))
 
 
@@ -228,27 +242,34 @@ def locked(sources: Path, group: str) -> dict[str, str]:
 
     Returns:
         Path relative to the group directory, to sha256.
+
     """
     lock = json.loads(sources.read_bytes())
-    require(lock["schema"] == 1, "unsupported sources.lock schema")
+    if lock["schema"] != 1:
+        fail("unsupported sources.lock schema")
     records = {"wheels": lock["wheels"], "apt": lock["apt"]["packages"]}[group]
     pins = {
         str(item["file"]).split("/", 1)[-1]: str(item["sha256"]) for item in records
     }
-    require(len(pins) == len(records), f"duplicate file in sources.lock {group}")
+    if len(pins) != len(records):
+        fail(f"duplicate file in sources.lock {group}")
     return pins
 
 
 def inputs(sources: Path, group: str, path: Path) -> None:
     """Require exactly the locked files of one group, each with its sha256."""
     pins = locked(sources, group)
-    require(path.is_dir(), f"missing {path}")
+    if not (path.is_dir()):
+        fail(f"missing {path}")
     found = sorted(entry.name for entry in path.iterdir())
-    require(found == sorted(pins), f"{path} does not hold exactly the locked files")
+    if found != sorted(pins):
+        fail(f"{path} does not hold exactly the locked files")
     for name, sha in pins.items():
         entry = path / name
-        require(entry.is_file() and not entry.is_symlink(), f"{entry} is not a file")
-        require(digest(entry) == sha, f"{entry} differs from its pin")
+        if not (entry.is_file() and not entry.is_symlink()):
+            fail(f"{entry} is not a file")
+        if digest(entry) != sha:
+            fail(f"{entry} differs from its pin")
 
 
 def installed(sources: Path) -> None:
@@ -259,7 +280,8 @@ def installed(sources: Path) -> None:
         (re.sub(r"[-_.]+", "-", dist.metadata["Name"]).lower(), dist.version)
         for dist in metadata.distributions(path=[str(SITE)])
     )
-    require(present == pinned, "installed distributions differ from sources.lock")
+    if present != pinned:
+        fail("installed distributions differ from sources.lock")
 
 
 def main(argv: list[str]) -> None:
@@ -267,11 +289,17 @@ def main(argv: list[str]) -> None:
     if argv[1:] == ["listing"]:
         _ = sys.stdout.buffer.write(listing())
         return
-    if len(argv) == 5 and argv[1] == "inputs":
-        require(argv[3] in {"wheels", "apt"}, "unknown input group")
+    if len(argv) == INPUTS_ARGC and argv[1] == "inputs":
+        if argv[3] not in {"wheels", "apt"}:
+            fail("unknown input group")
         inputs(Path(argv[2]), argv[3], Path(argv[4]))
         return
-    if len(argv) != 3 or argv[1] not in {"installed", "normalise", "write", "check"}:
+    if len(argv) != COMMAND_ARGC or argv[1] not in {
+        "installed",
+        "normalise",
+        "write",
+        "check",
+    }:
         fail("usage: see the docstring of docker/base/manifest.py")
     path = Path(argv[2])
     if argv[1] == "installed":
@@ -282,13 +310,13 @@ def main(argv: list[str]) -> None:
         return
     document = encode(record())
     if argv[1] == "write":
-        require(not path.exists(), f"{path} already exists")
+        if path.exists():
+            fail(f"{path} already exists")
         _ = path.write_bytes(document)
         path.chmod(0o444)
         return
-    require(
-        path.read_bytes() == document, "the base differs from its recorded manifest"
-    )
+    if path.read_bytes() != document:
+        fail("the base differs from its recorded manifest")
     _ = sys.stdout.buffer.write(document)
 
 

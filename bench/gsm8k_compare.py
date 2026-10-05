@@ -1,4 +1,4 @@
-# Copyright (c) 2026 inference contributors.
+# Copyright (c) 2026 Gil Rodrigues
 r"""Replay r0b0tlab's GSM8K acceptance workload against the serving endpoint.
 
 The workload is r0b0tlab/qwen38-exl3-dflash2 ``scripts/acceptance_check.py``: the
@@ -35,7 +35,6 @@ from bench.exl3 import (
     loads,
     mapping,
     request_bytes,
-    require,
     save,
     sequence,
     text,
@@ -155,11 +154,21 @@ def questions(path: Path, count: int) -> list[str]:
     Returns:
         The question strings in file order.
 
+    Raises:
+        ValueError: If the file is not the pinned GSM8K test set or ``count`` is
+            out of range.
+
     """
-    require(digest(path) == DATASET_SHA256, f"GSM8K file is not {DATASET_URL}")
+    if digest(path) != DATASET_SHA256:
+        msg = f"GSM8K file is not {DATASET_URL}"
+        raise ValueError(msg)
     rows = path.read_bytes().decode("utf-8").splitlines()
-    require(len(rows) == DATASET_ROWS, "GSM8K test file has an unexpected row count")
-    require(1 <= count <= DATASET_ROWS, f"--n must be 1..{DATASET_ROWS}")
+    if len(rows) != DATASET_ROWS:
+        msg = "GSM8K test file has an unexpected row count"
+        raise ValueError(msg)
+    if not (1 <= count <= DATASET_ROWS):
+        msg = f"--n must be 1..{DATASET_ROWS}"
+        raise ValueError(msg)
     return [text(mapping(loads(row))["question"]).strip() for row in rows[:count]]
 
 
@@ -168,6 +177,10 @@ def request(client: Client, index: int, question: str) -> Row:
 
     Returns:
         The validated request record.
+
+    Raises:
+        ValueError: If the reply is not one finished choice with consistent
+            native speculative counters.
 
     """
     payload = request_bytes({
@@ -179,23 +192,32 @@ def request(client: Client, index: int, question: str) -> Row:
     started = time.monotonic_ns()
     status, raw = client.exchange("POST", "/v1/completions", payload)
     finished = time.monotonic_ns()
-    require(status == HTTP_OK, f"Request {index} returned HTTP {status}")
+    if status != HTTP_OK:
+        msg = f"Request {index} returned HTTP {status}"
+        raise ValueError(msg)
     body = mapping(loads(raw))
     choices = sequence(body.get("choices"))
-    require(len(choices) == 1, f"Request {index} did not return exactly one choice")
+    if len(choices) != 1:
+        msg = f"Request {index} did not return exactly one choice"
+        raise ValueError(msg)
     choice = mapping(choices[0])
     finish = text(choice.get("finish_reason"))
-    require(finish in FINISH_REASONS, f"Request {index} finished with {finish}")
+    if finish not in FINISH_REASONS:
+        msg = f"Request {index} finished with {finish}"
+        raise ValueError(msg)
     usage = mapping(body.get("usage"))
     completion = integer(usage.get("completion_tokens"))
     spec = mapping(usage.get("exl3_spec"))
-    require(set(spec) == {"rounds", "committed"}, "Unexpected exl3_spec fields")
+    if set(spec) != {"rounds", "committed"}:
+        msg = "Unexpected exl3_spec fields"
+        raise ValueError(msg)
     rounds, committed = integer(spec["rounds"]), integer(spec["committed"])
-    require(
+    if not (
         1 <= rounds <= committed <= completion <= MAX_NEW_TOKENS
-        and committed <= (DRAFT_PROPOSALS + 1) * rounds,
-        f"Request {index} has inconsistent native speculative counters",
-    )
+        and committed <= (DRAFT_PROPOSALS + 1) * rounds
+    ):
+        msg = f"Request {index} has inconsistent native speculative counters"
+        raise ValueError(msg)
     return Row(
         index=index,
         prompt_tokens=integer(usage.get("prompt_tokens")),
@@ -270,16 +292,28 @@ def summarize(rows: list[Row], joules: list[float | None]) -> dict[str, object]:
 
 
 def main() -> None:
-    """Run the replay once and write one exclusive-create JSON record."""
+    """Run the replay once and write one exclusive-create JSON record.
+
+    Raises:
+        ValueError: If the record exists or the endpoint is unhealthy or serves
+            another model.
+
+    """
     arguments = parse_arguments()
-    require(not arguments.out.exists(), "Output record already exists")
+    if arguments.out.exists():
+        msg = "Output record already exists"
+        raise ValueError(msg)
     prompts = questions(arguments.data, arguments.n)
     client = Client(arguments.api_key_file.read_text(encoding="utf-8").strip())
     health = client.json("GET", "/health", None)
-    require(health == {"status": "ok"}, "Endpoint is not healthy")
+    if health != {"status": "ok"}:
+        msg = "Endpoint is not healthy"
+        raise ValueError(msg)
     served = sequence(client.json("GET", "/v1/models", None)["data"])
     names = [text(mapping(item)["id"]) for item in served]
-    require(names == [MODEL], f"Endpoint must serve only {MODEL}")
+    if names != [MODEL]:
+        msg = f"Endpoint must serve only {MODEL}"
+        raise ValueError(msg)
     rows, joules, power = measure(
         client, prompts, arguments.gpu, arguments.power_interval
     )

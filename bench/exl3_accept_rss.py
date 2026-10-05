@@ -1,16 +1,27 @@
+# Copyright (c) 2026 Gil Rodrigues
 """RSS delta of loading libexl3_accept.so (fresh process): exl3_accept_rss.py LIB."""
 
 import ctypes
 import json
 import sys
+from pathlib import Path
+
+STATUS_KEYS = frozenset({"VmRSS", "RssAnon", "RssFile", "VmSize"})
 
 
-def status():
-    out = {}
-    for line in open("/proc/self/status"):
-        key, _, rest = line.partition(":")
-        if key in ("VmRSS", "RssAnon", "RssFile", "VmSize"):
-            out[key] = int(rest.split()[0])
+def status() -> dict[str, int]:
+    """Read this process's memory counters.
+
+    Returns:
+        The selected /proc/self/status fields, in KiB.
+
+    """
+    out: dict[str, int] = {}
+    with Path("/proc/self/status").open(encoding="utf-8") as lines:
+        for line in lines:
+            key, _, rest = line.partition(":")
+            if key in STATUS_KEYS:
+                out[key] = int(rest.split()[0])
     return out
 
 
@@ -31,8 +42,11 @@ fn.restype = ctypes.c_int32
 loaded = status()
 result = fn(cells)
 called = status()
-print(json.dumps({
-    "result": result,
-    "load_kib": {k: loaded[k] - before[k] for k in before},
-    "first_call_kib": {k: called[k] - loaded[k] for k in before},
-}))
+sys.stdout.write(
+    json.dumps({
+        "result": result,
+        "load_kib": {k: loaded[k] - before[k] for k in before},
+        "first_call_kib": {k: called[k] - loaded[k] for k in before},
+    })
+    + "\n"
+)

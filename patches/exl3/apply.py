@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Gil Rodrigues
 """Apply the pinned EXL3 engine patch series to the installed package, fail closed.
 
 Run once at image build time by the candidate stage of Dockerfile.exl3:
@@ -29,6 +30,7 @@ HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?\Z")
 SERIES_LINE = re.compile(r"([0-9a-f]{64})  ([0-9A-Za-z._-]+\.patch)\Z")
 MANIFEST_KEYS = {"schema", "engine", "series_sha256", "patches", "files", "acceptor"}
 ENGINE_KEYS = {"package", "version", "revision", "root"}
+ARGC = 3
 
 type Hunk = tuple[int, int, list[str]]
 type FilePatch = tuple[str, bool, list[Hunk]]
@@ -39,14 +41,9 @@ def fail(message: str) -> NoReturn:
 
     Raises:
         ValueError: Always.
+
     """
     raise ValueError(message)
-
-
-def require(condition: bool, message: str) -> None:
-    """Abort the build unless the condition holds."""
-    if not condition:
-        fail(message)
 
 
 def digest(path: Path) -> str:
@@ -54,8 +51,10 @@ def digest(path: Path) -> str:
 
     Returns:
         The lowercase hex SHA-256 of the file bytes.
+
     """
-    require(path.is_file() and not path.is_symlink(), f"{path} is not a regular file")
+    if not (path.is_file() and not path.is_symlink()):
+        fail(f"{path} is not a regular file")
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -64,6 +63,7 @@ def pinned(value: object, label: str) -> str:
 
     Returns:
         The validated digest.
+
     """
     if not isinstance(value, str) or HEX64.match(value) is None:
         fail(f"{label} is not a sha256")
@@ -75,6 +75,7 @@ def text_value(value: object, label: str) -> str:
 
     Returns:
         The validated string.
+
     """
     if not isinstance(value, str) or not value:
         fail(f"{label} is not a nonempty string")
@@ -86,15 +87,16 @@ def safe_relative(value: str) -> str:
 
     Returns:
         The validated relative path.
+
     """
     parts = value.split("/")
-    require(
+    if not (
         bool(value)
         and not value.startswith("/")
         and ".." not in parts
-        and "" not in parts,
-        f"unsafe relative path {value!r}",
-    )
+        and "" not in parts
+    ):
+        fail(f"unsafe relative path {value!r}")
     return value
 
 
@@ -104,62 +106,79 @@ def parse_patch(text: str) -> list[FilePatch]:
     Returns:
         (relative path, creates file, hunks) per file, each hunk being
         (old start, old count, body lines).
+
     """
-    require(text.endswith("\n"), "patch does not end with a newline")
+    if not text.endswith("\n"):
+        fail("patch does not end with a newline")
     lines = text.splitlines(keepends=True)
     files: list[FilePatch] = []
     index = 0
     while index < len(lines):
         old = lines[index].rstrip("\n")
-        require(
-            old.startswith("--- "), f"expected a file header at patch line {index + 1}"
-        )
-        require(index + 1 < len(lines), "patch ends inside a file header")
+        if not old.startswith("--- "):
+            fail(f"expected a file header at patch line {index + 1}")
+        if index + 1 >= len(lines):
+            fail("patch ends inside a file header")
         new = lines[index + 1].rstrip("\n")
-        require(new.startswith("+++ b/"), f"expected +++ b/ at patch line {index + 2}")
+        if not new.startswith("+++ b/"):
+            fail(f"expected +++ b/ at patch line {index + 2}")
         relative = safe_relative(new.removeprefix("+++ b/"))
         creates = old == "--- /dev/null"
-        require(
-            creates or old == f"--- a/{relative}", f"mismatched headers: {relative}"
-        )
+        if not (creates or old == f"--- a/{relative}"):
+            fail(f"mismatched headers: {relative}")
         index += 2
         hunks: list[Hunk] = []
         while index < len(lines) and lines[index].startswith("@@"):
-            match = HUNK.match(lines[index].rstrip("\n"))
-            if match is None:
-                fail(f"malformed hunk header at patch line {index + 1}")
-            old_start = int(match.group(1))
-            old_count = int(match.group(2) or "1")
-            new_count = int(match.group(4) or "1")
-            index += 1
-            body: list[str] = []
-            seen_old = seen_new = 0
-            while seen_old < old_count or seen_new < new_count:
-                require(index < len(lines), "patch ends inside a hunk")
-                line = lines[index]
-                tag = line[:1]
-                require(
-                    tag in {" ", "-", "+"},
-                    f"unsupported line at patch line {index + 1}",
-                )
-                seen_old += tag != "+"
-                seen_new += tag != "-"
-                body.append(line)
-                index += 1
-            require(
-                seen_old == old_count and seen_new == new_count,
-                f"hunk line counts disagree in {relative}",
-            )
-            hunks.append((old_start, old_count, body))
-        require(bool(hunks), f"file {relative} has no hunks")
+            hunk, index = parse_hunk(lines, index, relative)
+            hunks.append(hunk)
+        if not hunks:
+            fail(f"file {relative} has no hunks")
         files.append((relative, creates, hunks))
     return files
+
+
+def parse_hunk(lines: list[str], index: int, relative: str) -> tuple[Hunk, int]:
+    """Parse one hunk starting at its header line.
+
+    Args:
+        lines: All patch lines, newlines kept.
+        index: Position of the hunk header.
+        relative: Path of the file being patched, for messages.
+
+    Returns:
+        The (old start, old count, body lines) hunk and the next line index.
+
+    """
+    match = HUNK.match(lines[index].rstrip("\n"))
+    if match is None:
+        fail(f"malformed hunk header at patch line {index + 1}")
+    old_start = int(match.group(1))
+    old_count = int(match.group(2) or "1")
+    new_count = int(match.group(4) or "1")
+    index += 1
+    body: list[str] = []
+    seen_old = seen_new = 0
+    while seen_old < old_count or seen_new < new_count:
+        if index >= len(lines):
+            fail("patch ends inside a hunk")
+        line = lines[index]
+        tag = line[:1]
+        if tag not in {" ", "-", "+"}:
+            fail(f"unsupported line at patch line {index + 1}")
+        seen_old += tag != "+"
+        seen_new += tag != "-"
+        body.append(line)
+        index += 1
+    if not (seen_old == old_count and seen_new == new_count):
+        fail(f"hunk line counts disagree in {relative}")
+    return (old_start, old_count, body), index
 
 
 def apply_file(path: Path, *, creates: bool, hunks: list[Hunk]) -> None:
     """Apply hunks at their exact recorded positions."""
     if creates:
-        require(not path.exists(), f"{path} already exists")
+        if path.exists():
+            fail(f"{path} already exists")
         source: list[str] = []
     else:
         source = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -167,7 +186,8 @@ def apply_file(path: Path, *, creates: bool, hunks: list[Hunk]) -> None:
     cursor = 0
     for old_start, old_count, body in hunks:
         start = old_start - 1 if old_count else old_start
-        require(start >= cursor, f"overlapping or unordered hunks in {path}")
+        if start < cursor:
+            fail(f"overlapping or unordered hunks in {path}")
         result.extend(source[cursor:start])
         cursor = start
         for line in body:
@@ -175,10 +195,8 @@ def apply_file(path: Path, *, creates: bool, hunks: list[Hunk]) -> None:
             if tag == "+":
                 result.append(content)
                 continue
-            require(
-                cursor < len(source) and source[cursor] == content,
-                f"hunk context mismatch in {path} at line {cursor + 1}",
-            )
+            if not (cursor < len(source) and source[cursor] == content):
+                fail(f"hunk context mismatch in {path} at line {cursor + 1}")
             if tag == " ":
                 result.append(content)
             cursor += 1
@@ -192,24 +210,24 @@ def check_engine(engine: object) -> Path:
 
     Returns:
         The engine package root.
+
     """
     if not isinstance(engine, dict) or set(engine) != ENGINE_KEYS:
         fail("bad engine record")
     package = text_value(engine["package"], "engine package")
     _ = text_value(engine["revision"], "engine revision")
-    require(
-        importlib.metadata.version(package)
-        == text_value(engine["version"], "engine version"),
-        "installed engine version differs from the manifest",
-    )
+    if importlib.metadata.version(package) != text_value(
+        engine["version"], "engine version"
+    ):
+        fail("installed engine version differs from the manifest")
     root = Path(text_value(engine["root"], "engine root"))
     module = importlib.util.find_spec(package)
-    require(
+    if not (
         module is not None
         and module.origin is not None
-        and Path(module.origin).parent == root,
-        "installed engine root differs from the manifest",
-    )
+        and Path(module.origin).parent == root
+    ):
+        fail("installed engine root differs from the manifest")
     return root
 
 
@@ -218,12 +236,11 @@ def check_series(patch_dir: Path, manifest: dict[str, object]) -> list[tuple[str
 
     Returns:
         (patch name, sha256) in application order.
+
     """
     series = patch_dir / "series"
-    require(
-        digest(series) == pinned(manifest["series_sha256"], "series_sha256"),
-        "series hash mismatch",
-    )
+    if digest(series) != pinned(manifest["series_sha256"], "series_sha256"):
+        fail("series hash mismatch")
     entries: list[tuple[str, str]] = []
     for line in series.read_text(encoding="utf-8").splitlines():
         match = SERIES_LINE.match(line)
@@ -231,12 +248,12 @@ def check_series(patch_dir: Path, manifest: dict[str, object]) -> list[tuple[str
             fail(f"malformed series line {line!r}")
         entries.append((match.group(2), match.group(1)))
     recorded = manifest["patches"]
-    require(
+    if not (
         isinstance(recorded, list)
         and bool(entries)
-        and recorded == [{"name": name, "sha256": sha} for name, sha in entries],
-        "series differs from the manifest",
-    )
+        and recorded == [{"name": name, "sha256": sha} for name, sha in entries]
+    ):
+        fail("series differs from the manifest")
     return entries
 
 
@@ -245,6 +262,7 @@ def check_files(manifest: dict[str, object]) -> dict[str, tuple[str | None, str]
 
     Returns:
         relative path -> (pre sha256 or None for a created file, post sha256).
+
     """
     files = manifest["files"]
     if not isinstance(files, dict) or not files:
@@ -253,7 +271,8 @@ def check_files(manifest: dict[str, object]) -> dict[str, tuple[str | None, str]
     for relative, record in files.items():
         if not isinstance(relative, str) or not isinstance(record, dict):
             fail("bad file record")
-        require(set(record) == {"pre", "post"}, f"bad file record {relative}")
+        if set(record) != {"pre", "post"}:
+            fail(f"bad file record {relative}")
         pre = record["pre"]
         pins[safe_relative(relative)] = (
             None if pre is None else pinned(pre, f"{relative} pre"),
@@ -273,62 +292,102 @@ def check_acceptor(acceptor: object) -> None:
     for relative, sha in files.items():
         if not isinstance(relative, str):
             fail("bad acceptor file name")
-        require(
-            digest(root / safe_relative(relative))
-            == pinned(sha, f"acceptor {relative}"),
-            f"acceptor artifact hash mismatch: {relative}",
-        )
+        if digest(root / safe_relative(relative)) != pinned(
+            sha, f"acceptor {relative}"
+        ):
+            fail(f"acceptor artifact hash mismatch: {relative}")
+
+
+def check_pre_images(root: Path, pins: dict[str, tuple[str | None, str]]) -> None:
+    """Require every pinned file's pre-image, or its absence for created files.
+
+    Args:
+        root: Engine package root.
+        pins: Relative path to (pre, post) hashes.
+
+    """
+    for relative, (pre, _) in pins.items():
+        if pre is None:
+            if (root / relative).exists():
+                fail(f"{relative} exists before its patch")
+        elif digest(root / relative) != pre:
+            fail(f"pre-image mismatch: {relative}")
+
+
+def check_post_images(root: Path, pins: dict[str, tuple[str | None, str]]) -> None:
+    """Require every pinned file's post-image.
+
+    Args:
+        root: Engine package root.
+        pins: Relative path to (pre, post) hashes.
+
+    """
+    for relative, (_, post) in pins.items():
+        if digest(root / relative) != post:
+            fail(f"post-image mismatch: {relative}")
+
+
+def apply_parsed(
+    root: Path,
+    parsed: list[list[FilePatch]],
+    pins: dict[str, tuple[str | None, str]],
+) -> None:
+    """Apply parsed patches in order, requiring every pinned file to be touched.
+
+    Args:
+        root: Engine package root.
+        parsed: Parsed patches in series order.
+        pins: Relative path to (pre, post) hashes.
+
+    """
+    touched: set[str] = set()
+    for patch in parsed:
+        for relative, creates, hunks in patch:
+            if relative not in pins:
+                fail(f"patch touches unpinned file {relative}")
+            if creates != (pins[relative][0] is None and relative not in touched):
+                fail(f"file creation disagrees with the manifest: {relative}")
+            apply_file(root / relative, creates=creates, hunks=hunks)
+            touched.add(relative)
+    if touched != set(pins):
+        fail("manifest pins files no patch touches")
 
 
 def main(argv: list[str]) -> None:
     """Verify, apply, re-verify, and record the patch series."""
-    require(len(argv) == 3, "usage: apply.py <patch-dir> <out-manifest>")
+    if len(argv) != ARGC:
+        fail("usage: apply.py <patch-dir> <out-manifest>")
     patch_dir = Path(argv[1])
     out = Path(argv[2])
-    require(not out.exists(), f"{out} already exists")
+    if out.exists():
+        fail(f"{out} already exists")
     manifest_bytes = (patch_dir / "exl3-patches.json").read_bytes()
     manifest: object = json.loads(manifest_bytes)
     if not isinstance(manifest, dict) or set(manifest) != MANIFEST_KEYS:
         fail("bad manifest keys")
-    require(manifest["schema"] == 1, "unsupported manifest schema")
+    if manifest["schema"] != 1:
+        fail("unsupported manifest schema")
     root = check_engine(manifest["engine"])
     entries = check_series(patch_dir, manifest)
     pins = check_files(manifest)
 
-    for relative, (pre, _) in pins.items():
-        if pre is None:
-            require(
-                not (root / relative).exists(), f"{relative} exists before its patch"
-            )
-        else:
-            require(digest(root / relative) == pre, f"pre-image mismatch: {relative}")
+    check_pre_images(root, pins)
 
     parsed: list[list[FilePatch]] = []
     for name, sha in entries:
         path = patch_dir / name
-        require(digest(path) == sha, f"patch hash mismatch: {name}")
+        if digest(path) != sha:
+            fail(f"patch hash mismatch: {name}")
         parsed.append(parse_patch(path.read_text(encoding="utf-8")))
-    touched: set[str] = set()
-    for patch in parsed:
-        for relative, creates, hunks in patch:
-            require(relative in pins, f"patch touches unpinned file {relative}")
-            require(
-                creates == (pins[relative][0] is None and relative not in touched),
-                f"file creation disagrees with the manifest: {relative}",
-            )
-            apply_file(root / relative, creates=creates, hunks=hunks)
-            touched.add(relative)
-    require(touched == set(pins), "manifest pins files no patch touches")
-
-    for relative, (_, post) in pins.items():
-        require(digest(root / relative) == post, f"post-image mismatch: {relative}")
+    apply_parsed(root, parsed, pins)
+    check_post_images(root, pins)
     check_acceptor(manifest["acceptor"])
 
     _ = out.write_bytes(manifest_bytes)
     out.chmod(0o444)
-    print(
+    _ = sys.stdout.write(
         f"Applied {len(entries)} EXL3 patch(es); manifest sha256 "
-        f"{hashlib.sha256(manifest_bytes).hexdigest()}"
+        f"{hashlib.sha256(manifest_bytes).hexdigest()}\n"
     )
 
 

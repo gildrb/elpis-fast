@@ -16,10 +16,21 @@ nix develop . --no-write-lock-file -c uv run --locked --python python3.13 --no-m
 ```
 
 Add `--offline` after `uv run` once the locked environment is available.
-Ruff 0.16.10 and ty 0.0.80 are exact development pins. tokenizers 0.23.2 matches
-the serving image (`docker/base/requirements.lock`) so ty resolves `bench/exl3.py`.
-Serving runtime pins are separate from the upstream evaluation environment
-pins described in [eval/README.md](../eval/README.md).
+Ruff 0.16.10 and ty 0.0.80 are exact development pins. numpy 2.5.3 and
+tokenizers 0.23.2 match the serving image (`docker/base/requirements.lock`)
+so ty resolves them. Serving runtime pins are separate from the upstream
+evaluation environment pins described in [eval/README.md](../eval/README.md).
+
+`ty check .` skips the files that import torch, exllamav3, JSON Schema or
+Verifiers (`[tool.ty.src] exclude`). Check them in their own environments.
+`IMAGE` is an image that `docker/build-exl3.sh candidate-ext` built from this
+checkout:
+
+```console
+docker run --rm --network none -v "$PWD:/w:ro" -v "$PWD/.venv/bin/ty:/usr/local/bin/ty:ro" -w /w --entrypoint ty "$IMAGE" check --python /opt/venv/bin/python3 serve/exl3_server.py bench/exl3_accept_latency.py
+nix develop . --no-write-lock-file -c eval/direct/setup
+nix develop . --no-write-lock-file -c uv run --locked --python python3.13 --no-managed-python ty check --python eval/direct/mrcr/.venv --python-version 3.12 eval/direct
+```
 
 ## Policy
 
@@ -38,8 +49,19 @@ indentation (E111, E114, E117, W191, D206), quotes (D300, Q000, Q001, Q002,
 Q003), and trailing commas (COM812, COM819). Their named lint counterparts
 are disabled, not source-level errors. ISC001 and ISC002 remain enabled;
 the default multiline concatenation setting is formatter-compatible.
-No file exclusions, per-file exemptions, type ignores or diagnostic
-suppression directives are added.
+One rule is off: `suspicious-subprocess-import` (S404) flags every
+`import subprocess`. `subprocess-without-shell-equals-true` (S603) stays on
+and checks every call. Ruff and ty skip
+`patches/exl3-ext/upstream-355c6ee/setup.py`: it is the upstream file,
+byte-pinned in `patches/exl3-ext/exl3-ext.json`. No other file exclusions,
+per-file exemptions or type ignores are added.
+
+A finding that only a workaround would silence gets a line suppression with
+its reason: `# ruff: ignore[<rule-name>]  <reason>`. Use the rule name, one
+line, one site. Today these are S603 calls whose argv is a list without a
+shell but not all literals, and single sites of S108, S310, PTH115, RUF069,
+S311, S324, PLC0415, BLE001 and PLR0913/PLR0917.
+`grep -rn 'ruff: ignore' --include='*.py' .` lists them all.
 
 ## Scope and honest failures
 
@@ -52,9 +74,8 @@ JSON Schema dependencies in `serve/exl3-requirements.txt`. The Python runtime
 inside that image is separate from the repository's development environment.
 
 The CPU development environment does not install serving torch, EXL3 or
-transformers. Missing imports remain explicit environment blockers, not ignored
-rules. Validate authored runtime modules in their separately pinned image before
-claiming complete type coverage. Bend sources are checked with the pinned
+transformers. The files that import them are type-checked in the serving
+image (see above). Bend sources are checked with the pinned
 `.#bend` toolchain (see [README, Prove](../README.md#prove)), not the Python gates;
 `nix run .#bend-verdict -- PROOF.bend --verdict` rechecks them with Bend's
 Lean-proven kernel (same Bend, plus the pinned Lean 4.34.0 from `nix/lean4.nix`).

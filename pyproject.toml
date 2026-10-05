@@ -9,6 +9,7 @@ package = false
 
 [dependency-groups]
 dev = [
+    "numpy==2.5.3",
     "ruff==0.16.10",
     "tokenizers==0.23.2",
     "ty==0.0.80",
@@ -19,6 +20,8 @@ required-version = "==0.16.10"
 target-version = "py313"
 line-length = 88
 preview = true
+# Upstream ExLlamaV3 file, byte-pinned in patches/exl3-ext/exl3-ext.json.
+extend-exclude = ["patches/exl3-ext/upstream-355c6ee"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -28,6 +31,8 @@ ignore = [
     "incorrect-blank-line-before-class", "multi-line-summary-second-line",
     "missing-trailing-comma", "prohibited-trailing-comma", "docstring-tab-indentation", "triple-single-quotes", "indentation-with-invalid-multiple", "indentation-with-invalid-multiple-comment", "over-indented",
     "bad-quotes-inline-string", "bad-quotes-multiline-string", "bad-quotes-docstring", "avoidable-escaped-quote", "tab-indentation",
+    # S404 flags every `import subprocess`; S603 still checks every call.
+    "suspicious-subprocess-import",
 ]
 
 [tool.ruff.format]
@@ -37,6 +42,18 @@ docstring-code-format = true
 
 [tool.ty.environment]
 python-version = "3.13"
+# The links run as scripts: their own directory is first on sys.path.
+extra-paths = ["bend", "bend/gen"]
+
+[tool.ty.src]
+# Checked in other environments (docs/development.md): the serving image
+# (torch, triton, exllamav3, jsonschema) and eval/direct/mrcr/.venv (verifiers).
+exclude = [
+    "patches/exl3-ext/upstream-355c6ee",
+    "serve/exl3_server.py",
+    "bench/exl3_accept_latency.py",
+    "eval/direct",
+]
 
 [tool.ty.rules]
 all = "error"
