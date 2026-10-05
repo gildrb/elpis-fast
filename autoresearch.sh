@@ -22,7 +22,9 @@ bkey=$(cd -- "$root" && find bend flake.nix flake.lock -type f ! -name '*.pyc' -
 	sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
 bcache=/tmp/kernel-work/AR/bend-exl3-$bkey
 cd -- "$root"
-export DOCKER_HOST=unix:///run/user/1000/docker.sock GPU_COOL_GAP=120
+# Fixed SOURCE_DATE_EPOCH (session baseline f230543): commits alone keep the ext build cached.
+export DOCKER_HOST=unix:///run/user/1000/docker.sock GPU_COOL_GAP=120 \
+	EXL3_SOURCE_DATE_EPOCH=1791224614
 stamp=$(date +%Y%m%d-%H%M%S)
 out=/tmp/kernel-work/AR/run-$stamp
 tag=qwen-inference:ar-candidate

@@ -40,7 +40,9 @@ if [[ "$image" == "$base" || "$existing_id" == "$base_id" ]]; then
   echo "Refusing to overwrite a tag of the base image." >&2
   exit 1
 fi
-epoch="$(git -C "$root" log -1 --format=%ct HEAD)"
+# EXL3_SOURCE_DATE_EPOCH pins the epoch across commits (autoresearch.sh) so that a
+# new commit alone does not invalidate the cached extension build.
+epoch="${EXL3_SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=%ct HEAD)}"
 if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
   echo "Refusing EXL3 build: no commit time for SOURCE_DATE_EPOCH." >&2
   exit 1
