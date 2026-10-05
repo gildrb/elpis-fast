@@ -1,0 +1,53 @@
+--- a/exllamav3_ext/pattn8i_kernel.cuh
++++ b/exllamav3_ext/pattn8i_kernel.cuh
+@@ -14,6 +14,10 @@
+ // to int8 with one scale per row (absmax / 127); the row factor rs = absmax / 127 * scale_log2 is kept.
+ // S = int32 dot over 256 dims (8 chained IMMA, |acc| <= 256 * 127 * 126 < 2^22, converted exactly with the
+ // 1.5 * 2^23 magic) * (rs * skk): scores in the log2 domain, then pattn8's softmax.
++// Ext 3022 (ping-pong): two K / V stages; tile it lives in stage it & 1 and tile it + 1 is issued into the
++// other stage right after the iteration's one barrier, so its cp.async loads overlap QK, softmax and PV of
++// tile it. Per-thread arithmetic and its order are 3021's (only the load / barrier schedule differs), so the
++// output is bit-identical to 3021c. bend/pattn8i_pipe.bend models the schedule.
+ #include "pattn8_kernel.cuh"
+ 
+ #define P8I_Q_OFF 0                                             // [128][256] int8, swizzled 16-B chunks
+@@ -22,7 +26,8 @@
+ #define P8I_KS_REL (PA_BN * PA_HD)                              // stage: [32][256] int8 K, [32] fp32 skk,
+ #define P8I_V_REL (P8I_KS_REL + PA_BN * 4)                      //        [32][256] fp16 V (pattn swizzle)
+ #define P8I_STAGE (P8I_V_REL + PA_BN * PA_HD * 2)
+-#define P8I_SMEM (P8I_ST_OFF + P8I_STAGE)
++#define P8I_NST 2                                               // stages: tile it in stage it & 1
++#define P8I_SMEM (P8I_ST_OFF + P8I_NST * P8I_STAGE)
+ #define PS_TOK 16                                               // stage pass: token positions per CTA
+ #define PS_THREADS 256
+ 
+@@ -317,19 +322,17 @@
+     #pragma unroll 1
+     for (int it = 0; it < ntiles_cta; ++it)
+     {
+-        asm volatile("cp.async.wait_group 1;\n" ::);   // K(it) landed (V(it) may be in flight)
+-        __syncthreads();                              // (A) K(it) visible
+-        const bool act = it < ntiles;
+-        if (act) { qk(0); softmax(it); }
+-        cp_wait0();
+-        __syncthreads();                              // (B) V(it) visible; every warp done with K(it)
+-        if (it + 1 < ntiles_cta) issue_k(it + 1, 0, tid, P8_THREADS);
+-        cp_commit();
+-        if (act) pv(0);
+-        asm volatile("cp.async.wait_group 1;\n" ::);
+-        __syncthreads();                              // (C) every warp done with V(it)
+-        if (it + 1 < ntiles_cta) issue_v(it + 1, 0, tid, P8_THREADS);
++        const int st = it & 1;
++        cp_wait0();                                   // tile it landed: the only groups in flight
++        __syncthreads();                              // tile it visible; every warp done with tile it - 1
++        if (it + 1 < ntiles_cta)                      // tile it + 1 into stage st ^ 1 (tile it - 1's)
++        {
++            issue_k(it + 1, st ^ 1, tid, P8_THREADS);
++            issue_v(it + 1, st ^ 1, tid, P8_THREADS);
++        }
+         cp_commit();
++        const bool act = it < ntiles;
++        if (act) { qk(st); softmax(it); pv(st); }
+     }
+     cp_wait0();
+     if (ntiles == 0) return;

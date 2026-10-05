@@ -231,3 +231,11 @@ import ./bend/pattn8i_int_laws.bend as Pattn8iIntLaws
 # every well-shaped record, so a fault-free round is kept; under spec_inv_tree's hypotheses the emitted ids
 # commit the greedy continuation; dropping the readback comparison breaks the refinement (witness).
 import ./bend/tree_pipe_laws.bend as TreePipeLaws
+# ext 3022 ping-pong K / V pipeline of the int8-QK prefill kernel (exllamav3_ext/pattn8i_kernel.cuh; bend/pattn8i_pipe.bend
+# against the two-stage checker bend/pattn8i_pipe_spec.bend): `it & 1` is a stage and `st ^ 1` is tile it + 1's stage, never
+# tile it's; for every loop bound the prologue and every iteration pass the checker (each iteration reads a stage that holds
+# exactly its tile, issued in an earlier epoch and not overwritten; each issue goes to the stage nobody reads in that epoch),
+# and the checker rejects a same-stage issue, a stale read and an out-of-range stage; every warp computes exactly 3020's
+# trace (so 3010's loop 0 .. ntiles - 1) in loop order. With 3022 changing no per-thread arithmetic
+# (bend/pattn8i_pipe_diff.py), outputs are bit-identical to 3021c.
+import ./bend/pattn8i_pipe_laws.bend as Pattn8iPipeLaws

@@ -134,6 +134,7 @@ made with `--through` the patch whose number is `n`.
 | `attn_pre_diff.py`, `attn_stride_diff.py`, `pattn_sched_diff.py`, `gdn_ba_ksplit_diff.py`, `mlp_m16_defer_diff.py`, `gemm_m16_wpart_diff.py`, `m16_discard_diff.py` | `OUT/patched` | |
 | `pattn8_sched_diff.py`, `act_fuse_diff.py`, `gdn_conv_qkv_diff.py`, `prefill_nosync_diff.py` | `OUT/patched` | `pattn8_sched_diff.py` also checks 3021c's `pattn8i_kernel.cuh` schedule. `prefill_nosync_diff.py` runs the engine's `RecurrentCache` against the Bend trace. |
 | `pattn8i_int_diff.py` | `OUT/patched` | Builds and runs host C with the shell's `c++` (exhaustive i2f and fp16-scale checks). |
+| `pattn8i_pipe_diff.py` | `OUT/patched` | 3022's ping-pong loop, prologue, stage addressing and shared-memory defines against `bend/pattn8i_pipe.bend`; reads the 3022 patch to check it changes only schedule lines. |
 | `prefill_merge_diff.py` | `OUT9502/patched` | 5110h replaces `M4096_MAX_PROMPT = 131072`. |
 | `prefill_membound_diff.py` | `OUT5110h/patched` | 9503b changes the stage bound. |
 | `qc_staging_diff.py` | `OUT/patched` with 9503f and 9503b in the series | Evaluates the engine's `qc_staging_pages` against the Bend model. |

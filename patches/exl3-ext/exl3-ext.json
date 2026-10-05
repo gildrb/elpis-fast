@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "b4a4ae2ded8cbaf09430910b5711f0c70cc9aa92c632df3a068c9df611bcaa19",
+  "series_sha256": "5e12194cafe83f2a00c191bd4d5f2fbfd53730e428543e5e5029c4530a1f4f2a",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -205,6 +205,10 @@
     {
       "name": "9601-tree-verify-pipe.patch",
       "sha256": "6e130472e2331d63b8fd81a424438e8d72a9d64b988e6bcac96921b4b3c303ed"
+    },
+    {
+      "name": "3022-prefill-pattn8i-pingpong.patch",
+      "sha256": "2ed53e703d414b57eca9628952b07492ef9af1b3488d2874efcc70929a7db114"
     }
   ],
   "files": {
@@ -366,7 +370,7 @@
     },
     "exllamav3_ext/pattn8i_kernel.cuh": {
       "pre": null,
-      "post": "bb30644adb8f57967c55c7a69cc44b15c571e684131a7d236e41dfb183067c6c"
+      "post": "b18d8cfae9e10dcd623624136ee05d1900b09e5f0fcbd67d2e110679941bdcc6"
     },
     "exllamav3_ext/pattn_kernel.cuh": {
       "pre": null,
