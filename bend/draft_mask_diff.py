@@ -55,7 +55,7 @@ PINS = {
         "3eb3fda82aa99652eed42998b0d79a6c2add74d094bf453650b29c74e90dbd69"
     ),
     "modules/attention_fn/triton_paged.py": (
-        "792a461592bfdadbd3b0f903b9098951e0ce5964c9e860d354e6d5906b331290"
+        "0514a6e990f4b24bb91b15911e20f4564d299cf2367e22cba3323e1d228be184"
     ),
 }
 TRITON_PAGED = "modules/attention_fn/triton_paged.py"
