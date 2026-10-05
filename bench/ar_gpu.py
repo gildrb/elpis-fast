@@ -14,7 +14,8 @@ served chat template; the cut makes the rendered length land in
 
 Order: warm-up (1K x 32 tokens, 8K x 1 token; untimed), then
   prefill  8192 x2, 32768 x2, 131072 x1 (1 token each: TTFT),
-  decode   1024 8192 32768 32768 8192 1024 (256 tokens each, no stop).
+  decode   1024 8192 32768 32768 8192 1024 (256 tokens each, no stop),
+  native   262000 x1, 128 tokens (TTFT and decode at native context).
 Each decode depth runs one prompt twice.
 
   python -I -B /work/ar_gpu.py --dry-run   (CPU: size prompts -> /out/plan.json)
@@ -63,6 +64,7 @@ INSTRUCTION = (
     "ideas above, then give one original worked Python example with tests."
 )
 DECODE_TOKENS = 256
+NATIVE_TOKENS = 128
 MAX_CHUNK = 2048
 NVML_PERIOD_S = 0.05
 NVML_CLOCK_SM = 1
@@ -102,7 +104,8 @@ DECODE = tuple(
     Row("decode", d, 0, 1, DECODE_TOKENS)
     for d in (1024, 8192, 32768, 32768, 8192, 1024)
 )
-ROWS = WARM + PREFILL + DECODE
+NATIVE = (Row("native", 262000, 0, 1, NATIVE_TOKENS),)
+ROWS = WARM + PREFILL + DECODE + NATIVE
 
 
 class BenchError(RuntimeError):
