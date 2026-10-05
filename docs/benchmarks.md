@@ -36,8 +36,9 @@ gated and its scorer can fall back to a remote LLM judge.
 ## 2. Frozen autoresearch lane
 
 `python -m bench.autoresearch --suite broad` (`bench/autoresearch.py`
-supervisor/worker, `bench/exl3.py` identity, native taskset and C1 logic; same
-environment as `autoresearch.sh`) runs exactly once, in this order:
+supervisor, `bench/autoresearch_worker.py` worker, `bench/exl3.py` identity,
+native taskset and C1 logic; same environment as `autoresearch.sh`) runs
+exactly once, in this order:
 
 | Order | Workload | Frozen selection and settings |
 | --- | --- | --- |

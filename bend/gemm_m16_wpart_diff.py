@@ -10,14 +10,16 @@ from __future__ import annotations
 import hashlib
 import re
 import resource
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import source_link
+
+if TYPE_CHECKING:
+    import subprocess
 
 HERE = Path(__file__).resolve().parent
 REPO = source_link.REPO
@@ -913,11 +915,12 @@ def run_all_mutations(tree: str) -> int:
     """
     rc = 0
     for name in MUTATIONS:
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: sys.executable re-running this script with a fixed mutation name, no shell
+        r = source_link.run(
             [sys.executable, __file__, "--mutate", name, tree],
             capture_output=True,
             text=True,
             check=False,
+            cpu_heavy=False,
         )
         verdict, expected = mutation_verdict(name, r.stdout + r.stderr, r.returncode)
         if not expected:
@@ -1089,8 +1092,8 @@ def run_programs(
         c = Path(td) / "wpart.cpp"
         c.write_text(c_program(q, q_orig))
         exe = Path(td) / "wpart"
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-            source_link.locked([
+        source_link.run(
+            [
                 "c++",
                 "-O2",
                 "-std=c++17",
@@ -1099,12 +1102,12 @@ def run_programs(
                 "-o",
                 str(exe),
                 str(c),
-            ]),
+            ],
             check=True,
         )
         tab = Path(td) / "table"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([source_link.bend(), TABLE, "-o", str(tab)]),
+        r = source_link.run(
+            [source_link.bend(), TABLE, "-o", str(tab)],
             cwd=BEND_CWD,
             capture_output=True,
             text=True,
@@ -1112,13 +1115,13 @@ def run_programs(
         )
         if r.returncode != 0:
             fail(f"bend compile: {r.stdout}{r.stderr}")
-        cres = subprocess.run([str(exe)], capture_output=True, text=True, check=False)  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-        bres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(tab)],
-            capture_output=True,
-            text=True,
-            preexec_fn=unlimited_vm,
-            check=False,
+        cres = source_link.run(
+            [str(exe)], capture_output=True, text=True, check=False, cpu_heavy=False
+        )
+        # the Bend table child inherits the lifted limit
+        unlimited_vm()
+        bres = source_link.run(
+            [str(tab)], capture_output=True, text=True, check=False, cpu_heavy=False
         )
     return cres, bres
 

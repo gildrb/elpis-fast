@@ -32,7 +32,6 @@ import difflib
 import hashlib
 import re
 import resource
-import subprocess
 import sys
 import tempfile
 import textwrap
@@ -527,8 +526,8 @@ def bend_table(saved: str | None) -> str:
     with tempfile.TemporaryDirectory() as d:
         exe = Path(d) / "table"
         bend = source_link.bend()
-        p = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([bend, TABLE, "-o", str(exe)]),
+        p = source_link.run(
+            [bend, TABLE, "-o", str(exe)],
             cwd=REPO,
             capture_output=True,
             text=True,
@@ -541,8 +540,8 @@ def bend_table(saved: str | None) -> str:
         resource.setrlimit(
             resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
         )
-        p = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            source_link.locked([str(exe), "--gpu", "off"]),
+        p = source_link.run(
+            [str(exe), "--gpu", "off"],
             capture_output=True,
             text=True,
             timeout=TABLE_TIMEOUT,

@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -264,13 +263,14 @@ def bend_table() -> list[str]:
 
     """
     bend = source_link.bend()
-    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
+    proc = source_link.run(
         [bend, TABLE],
         cwd=REPO,
         capture_output=True,
         text=True,
         timeout=BEND_TIMEOUT,
         check=False,
+        cpu_heavy=False,
     )
     if proc.returncode != 0:
         fail(f"{bend} {TABLE} exited {proc.returncode}: {proc.stderr.strip()[:400]}")

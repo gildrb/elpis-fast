@@ -9,16 +9,16 @@ Bend table; USAGE holds the full description printed on a usage error.
 from __future__ import annotations
 
 import hashlib
-import random
 import re
 import resource
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import NoReturn
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "gen"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import detrand
 import source_link
 
 USAGE = (
@@ -670,7 +670,7 @@ def configs(seed: int = 2102) -> list[tuple[int, int, int, list[int]]]:
         for g_count in (82, 164)
         for m in range(1, 17)
     ]
-    rng = random.Random(seed)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  seeded RNG generates reproducible test configurations
+    rng = detrand.SplitMix64(seed)
     for _ in range(40):
         nm = rng.randint(1, 4)
         ns = [512 * rng.randint(1, 12) for _ in range(nm)]
@@ -736,8 +736,8 @@ def build(td: Path, program: str) -> tuple[Path, Path]:
     c = td / "diff.cpp"
     c.write_text(program)
     exe = td / "diff"
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-        source_link.locked([
+    source_link.run(
+        [
             "c++",
             "-O2",
             "-std=c++17",
@@ -745,12 +745,12 @@ def build(td: Path, program: str) -> tuple[Path, Path]:
             "-o",
             str(exe),
             str(c),
-        ]),
+        ],
         check=True,
     )
     tab = td / "table"
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-        source_link.locked([source_link.bend(), TABLE, "-o", str(tab)]),
+    source_link.run(
+        [source_link.bend(), TABLE, "-o", str(tab)],
         cwd=REPO,
         check=True,
         capture_output=True,
@@ -792,18 +792,24 @@ def run_configs(
 
     """
     rows = bad = mism = live = 0
+    # the Bend table children inherit the lifted limit
+    unlimited_vm()
     for m, k, g_count, ns in cfgs:
         args = [str(m), str(k), str(g_count), *[str(n) for n in ns]]
         cfg = f"m={m} k={k} G={g_count} ns={ns}"
-        cres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(exe), *args], capture_output=True, text=True, check=False
+        cres = source_link.run(
+            [str(exe), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            cpu_heavy=False,
         )
-        bres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
+        bres = source_link.run(
             [str(tab), *args],
             capture_output=True,
             text=True,
             check=True,
-            preexec_fn=unlimited_vm,
+            cpu_heavy=False,
         )
         bout = "\n".join(line for line in bres.stdout.split("\n") if line) + "\n"
         rows += len(cres.stdout.splitlines())

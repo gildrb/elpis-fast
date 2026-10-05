@@ -26,7 +26,6 @@ from __future__ import annotations
 import importlib.util
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -82,12 +81,13 @@ def bend_tables() -> list[tuple[int, list[int], list[int]]]:
         (kind, weights, values) per printed table.
 
     """
-    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
+    proc = source_link.run(
         [source_link.bend(), TABLE],
         cwd=REPO,
         capture_output=True,
         timeout=3600,
         check=False,
+        cpu_heavy=False,
     )
     if proc.returncode != 0:
         err = proc.stderr.decode(errors="replace")[:500]
@@ -141,9 +141,10 @@ def build_driver(tree: Path) -> list[str]:
             "c++ is not on PATH "
             "(run inside `nix develop --offline --no-write-lock-file`)"
         )
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: c++ from PATH compiling the generated driver in a private workdir, no shell
+    source_link.run(
         [cxx, "-O2", "-std=c++17", "-o", str(work / "drv"), str(work / "drv.cpp")],
         check=True,
+        cpu_heavy=False,
     )
     return [str(work / "drv")]
 
@@ -169,11 +170,12 @@ def check_driver(
     drv: list[str], tree: Path, kind: int, w: list[int], vals: list[int]
 ) -> None:
     """Compare one table with the tree's builder."""
-    out = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: driver just built in a private workdir + integer arguments, no shell
+    out = source_link.run(
         [*drv, str(kind), *(str(x) for x in w)],
         capture_output=True,
         text=True,
         check=True,
+        cpu_heavy=False,
     ).stdout.strip()
     got = [int(x) for x in out.split(",")] if not out.startswith("INVALID") else None
     if got != vals:

@@ -50,14 +50,13 @@ import json
 import re
 import resource
 import shutil
-import subprocess
 import sys
 import tempfile
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, NoReturn, Protocol, runtime_checkable
 
 try:
     import numpy as np
@@ -72,6 +71,9 @@ except ModuleNotFoundError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pysubset
 import source_link
+
+if TYPE_CHECKING:
+    import subprocess
 
 HERE = Path(__file__).resolve().parent
 REPO = source_link.REPO
@@ -1053,8 +1055,8 @@ def run_law_mutation(name: str) -> tuple[bool, str]:
         if t.count(a) != 1:
             fail(f"law mutation {name} does not apply exactly once")
         (Path(td) / fname).write_text(t.replace(a, b), encoding="utf-8")
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend + PROOF.bend in the mutation tempdir, no shell
-            source_link.locked([source_link.bend(), PROOF]),
+        r = source_link.run(
+            [source_link.bend(), PROOF],
             cwd=td,
             capture_output=True,
             text=True,
@@ -1094,11 +1096,12 @@ def run_all_mutations(tree: str) -> int:
     """
     rc = 0
     for name in MUTATIONS:
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: sys.executable re-running this script with a fixed mutation name, no shell
+        r = source_link.run(
             [sys.executable, __file__, "--mutate", name, tree],
             capture_output=True,
             text=True,
             check=False,
+            cpu_heavy=False,
         )
         if r.returncode == 0:
             say(f"{name}: SURVIVED (unexpected)")
@@ -1300,8 +1303,8 @@ def bend_rows() -> list[str]:
     """
     with tempfile.TemporaryDirectory() as td:
         exe = Path(td) / "table"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([source_link.bend(), TABLE, "-o", str(exe)]),
+        r = source_link.run(
+            [source_link.bend(), TABLE, "-o", str(exe)],
             cwd=HERE,
             capture_output=True,
             text=True,
@@ -1310,7 +1313,9 @@ def bend_rows() -> list[str]:
         if r.returncode != 0:
             fail(f"bend compile: {r.stdout}{r.stderr}")
         unlimited_vm()
-        bres = subprocess.run([str(exe)], capture_output=True, text=True, check=False)  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
+        bres = source_link.run(
+            [str(exe)], capture_output=True, text=True, check=False, cpu_heavy=False
+        )
     if bres.returncode != 0:
         fail(f"Bend table exited {bres.returncode}: {bres.stderr}")
     return bres.stdout.split("\n")
@@ -1427,8 +1432,8 @@ def run_c(q: dict[str, str], ref: Reference) -> subprocess.CompletedProcess[str]
         c = Path(td) / "topk.cpp"
         c.write_text(c_program(q, vocab, ref.runs), encoding="utf-8")
         exe = Path(td) / "topk"
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-            source_link.locked([
+        source_link.run(
+            [
                 cxx,
                 "-O2",
                 "-std=c++17",
@@ -1436,13 +1441,17 @@ def run_c(q: dict[str, str], ref: Reference) -> subprocess.CompletedProcess[str]
                 "-o",
                 str(exe),
                 str(c),
-            ]),
+            ],
             check=True,
         )
         inp = Path(td) / "maps.txt"
         inp.write_text("".join(ref.cfile), encoding="utf-8")
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: topk harness built in a private tempdir + its input file, no shell
-            [str(exe), str(inp)], capture_output=True, text=True, check=False
+        return source_link.run(
+            [str(exe), str(inp)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cpu_heavy=False,
         )
 
 

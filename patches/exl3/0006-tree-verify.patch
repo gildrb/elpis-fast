@@ -486,7 +486,7 @@
 +        page.sequence[:, pos % PAGE_SIZE] = token
 --- /dev/null
 +++ b/generator/tree_accept.py
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,100 @@
 +"""
 +Admitted acceptance decision and descriptor derivation for 8-row greedy tree verification.
 +
@@ -530,6 +530,7 @@
 +        module = importlib.util.module_from_spec(spec)
 +        spec.loader.exec_module(module)
 +        self.acceptor = module.admit(str(ACCEPTOR_DIR))
++        self.request = module.TreeRequest
 +
 +
 +    def accept_tree(
@@ -561,12 +562,14 @@
 +            Committed count in 1..7 at which a recurrent checkpoint boundary stops acceptance along the path, or 0
 +        """
 +        count, eos, last = self.acceptor.accept_tree(
-+            _ids(verify_ids),
-+            _ids(tokens),
-+            _ids(parent),
-+            tuple(sorted(stop_tokens)),
-+            budget,
-+            checkpoint,
++            self.request(
++                verify_ids=_ids(verify_ids),
++                tokens=_ids(tokens),
++                parents=_ids(parent),
++                stop_ids=tuple(sorted(stop_tokens)),
++                budget=budget,
++                checkpoint=checkpoint,
++            )
 +        )
 +        if (
 +            type(count) is not int or type(eos) is not bool or type(last) is not int

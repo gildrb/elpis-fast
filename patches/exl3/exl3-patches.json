@@ -6,7 +6,7 @@
     "revision": "355c6ee10fbd25b79070316a81ea0708cc18155a",
     "root": "/opt/venv/lib/python3.13/site-packages/exllamav3"
   },
-  "series_sha256": "d7e49073b22e8e9fb6750b397e04a384f2aa6d9236f3c121d1a8059fcb1dcfef",
+  "series_sha256": "a8dbc0ef157a26f678eea5e66f0958665deea4d5c57c9aacb22e49ed9ac09866",
   "patches": [
     {
       "name": "0001-greedy-batched-verify.patch",
@@ -26,7 +26,7 @@
     },
     {
       "name": "0006-tree-verify.patch",
-      "sha256": "c6a25e94573a1fc004f205ebcfd76b09982088724c8945f10b5e4807faa66cbe"
+      "sha256": "fca980f4b27a5e98bb1e180dc1385d8bcd394aa1512ca04f5751d37124c10262"
     }
   ],
   "files": {
@@ -60,7 +60,7 @@
     },
     "generator/tree_accept.py": {
       "pre": null,
-      "post": "4d4ff612c4970fc76df4060f68efdb55c22eee6bdc981c02cf22481404d009b5"
+      "post": "a7d669bcbf8bfb33f6f48a2985812a0824c8d81a18686f679310fbe18b96af5c"
     }
   },
   "acceptor": {
@@ -69,11 +69,11 @@
       "libexl3_accept.so": "79a6f61eb3b65126247492b81a5333de1b10e440ab9fab6a1a02b84128768651",
       "exl3_accept_table.txt": "7c84bd88fbd6ad01b0872e2516e24f44029bfc3f48c50978d6ca86ad93085d63",
       "exl3_bend_accept.py": "adc671d3c38b497a925d1ab689541633f210e4a5c2701e267ad3b2e7b88414d6",
-      "identity.json": "be334115bdc30f11fd0995dea6dc46ff052e87d5de13f389240220aaeac718cc",
+      "identity.json": "312d07d76f2a0f7f9e846936ae88fb9e47c7ff75974898cca4a376d96b427b7b",
       "libexl3_tree_accept.so": "b853b40619aba408687db77e9329fcfc81551efea1dc7acdfa46ca86bdbee4cf",
       "exl3_tree_accept_table.txt": "2bc7c90b66a77c0fcc8f0cf1231f471e0093c7a660185a563ff0290df74e0718",
-      "exl3_bend_tree_accept.py": "75193224860b282a4a7a85a7aa4b545504760101cae886f775827aab108e1284",
-      "tree_identity.json": "9cbe3253a060a7610630ba36226ee5701c04d8e28dce974999d3d0020f7ea5f9"
+      "exl3_bend_tree_accept.py": "c9080c98fab972e423da7e39e160e5526e471408be0a84c132569ac5238b0812",
+      "tree_identity.json": "9dcc7e04665ffe71ea41eb4d7fbee296d2fd0d64b2e3e551fa3e31b970edd365"
     }
   }
 }

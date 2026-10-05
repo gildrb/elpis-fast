@@ -113,9 +113,10 @@ COPY --from=candidate /opt/elpis-base-manifest.json /opt/elpis-base-manifest.jso
 
 # The extension stages and targets read the patch tools from the `patches` named build
 # context: build-exl3.sh snapshots patches/exl3 and patches/exl3-ext once, so both
-# build phases see identical inputs. ext.py verifies the source tree, the vendored
-# setup.py and the base's recorded shared object, applies the series only for
-# `patched`, and lays out /src/exllamav3 like the upstream checkout; setup.py then
+# build phases see identical inputs. ext.py verifies the source tree, the upstream
+# setup.py (staged from the pinned source archive) and the base's recorded shared
+# object, applies the series only for `patched`, and lays out /src/exllamav3 like the
+# upstream checkout; setup.py then
 # compiles every translation unit with its upstream flags. The smoke import needs
 # no driver: libcuda is dlopened lazily.
 FROM ext-toolchain AS ext-rebuilt

@@ -20,7 +20,7 @@ import gc
 import importlib.util
 import itertools
 import json
-import random
+import math
 import statistics
 import sys
 import time
@@ -37,6 +37,9 @@ if TYPE_CHECKING:
 STOP_HIT_RATE = 0.02
 SHORT_BUDGET_RATE = 0.05
 CHECKPOINT_RATE = 0.1
+SEED = 20260926
+MASK64 = (1 << 64) - 1
+GAMMA = 0x9E3779B97F4A7C15
 
 RawItem = tuple[list[int], list[int], set[int], int, int]
 ListItem = tuple[list[int], list[int], tuple[int, ...], int, int]
@@ -44,6 +47,88 @@ TensorItem = tuple[torch.Tensor, torch.Tensor, set[int], int, int]
 Call = Callable[..., object]
 Cases = dict[str, tuple[Call, str]]
 Items = dict[str, list[ListItem] | list[TensorItem]]
+
+
+class SplitMix64:
+    """SplitMix64 input generator, the same algorithm as ``bend/gen/detrand.py``.
+
+    This file is mounted alone into the served image, so it carries the draws
+    it uses instead of importing the bend module. Not cryptographic.
+    """
+
+    def __init__(self, seed: int) -> None:
+        """Start the stream at seed (taken modulo 2**64)."""
+        self.state = seed & MASK64
+
+    def next64(self) -> int:
+        """Return the next 64-bit output.
+
+        Returns:
+            An integer in [0, 2**64).
+
+        """
+        self.state = (self.state + GAMMA) & MASK64
+        z = self.state
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & MASK64
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & MASK64
+        return z ^ (z >> 31)
+
+    def below(self, n: int) -> int:
+        """Return a uniform integer in [0, n), by rejection (no modulo bias).
+
+        Returns:
+            An integer in [0, n).
+
+        Raises:
+            ValueError: n is not in [1, 2**64].
+
+        """
+        if not 1 <= n <= 1 << 64:
+            msg = f"below({n}): n must be in [1, 2**64]"
+            raise ValueError(msg)
+        limit = (1 << 64) - (1 << 64) % n
+        while True:
+            r = self.next64()
+            if r < limit:
+                return r % n
+
+    def randrange(self, start: int, stop: int | None = None) -> int:
+        """Return a uniform integer in [start, stop), or [0, start) alone.
+
+        Returns:
+            An integer in the half-open range.
+
+        """
+        if stop is None:
+            return self.below(start)
+        return start + self.below(stop - start)
+
+    def choice(self, seq: Sequence[int]) -> int:
+        """Return a uniform element of the non-empty seq.
+
+        Returns:
+            One element of seq.
+
+        """
+        return seq[self.below(len(seq))]
+
+    def random(self) -> float:
+        """Return a uniform float in [0, 1) with 53 random bits.
+
+        Returns:
+            A float in [0, 1).
+
+        """
+        return (self.next64() >> 11) * 2.0**-53
+
+    def expovariate(self, lambd: float) -> float:
+        """Return an exponential variate with rate lambd (mean 1 / lambd).
+
+        Returns:
+            A non-negative float.
+
+        """
+        return -math.log(1.0 - self.random()) / lambd
 
 
 def load(directory: str) -> ModuleType:
@@ -141,7 +226,7 @@ def served(acceptor: object) -> GreedyAccept:
     return g
 
 
-def inputs_table_k7(rng: random.Random, n: int) -> list[RawItem]:
+def inputs_table_k7(rng: SplitMix64, n: int) -> list[RawItem]:
     """Draw k = 7 inputs of the admission table section A (binary alphabet).
 
     Args:
@@ -163,7 +248,7 @@ def inputs_table_k7(rng: random.Random, n: int) -> list[RawItem]:
     return out
 
 
-def inputs_served(rng: random.Random, n: int) -> list[RawItem]:
+def inputs_served(rng: SplitMix64, n: int) -> list[RawItem]:
     """Draw k = 7 rounds shaped like serving.
 
     Random vocab ids, accepted prefix geometric (mean ~3.5 of 7), stop set of
@@ -364,7 +449,8 @@ def main(argv: list[str]) -> None:
     """
     out_path = argv[0]
     dirs = argv[1:]
-    rng = random.Random(20260926)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  seeded RNG generates reproducible benchmark inputs
+    rng = SplitMix64(SEED)
+    report_seed = {"generator": "splitmix64", "seed": SEED}
     table = inputs_table_k7(rng, 20000)
     real = inputs_served(rng, 20000)
     items: Items = {
@@ -377,6 +463,7 @@ def main(argv: list[str]) -> None:
         "python": sys.version,
         "torch": torch.__version__,
         "dirs": dirs,
+        "inputs": report_seed,
     }
     cases: Cases = {}
     for idx, d in enumerate(dirs):

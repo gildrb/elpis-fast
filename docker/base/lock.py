@@ -25,17 +25,28 @@ Any missing, ambiguous or unexpected input stops the tool.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import operator
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import urllib.parse
-import urllib.request
 from html.parser import HTMLParser
+from http import HTTPStatus
 from pathlib import Path
 from typing import NoReturn, override
+
+MAX_REDIRECTS = 5
+REDIRECTS = frozenset({
+    HTTPStatus.MOVED_PERMANENTLY,
+    HTTPStatus.FOUND,
+    HTTPStatus.SEE_OTHER,
+    HTTPStatus.TEMPORARY_REDIRECT,
+    HTTPStatus.PERMANENT_REDIRECT,
+})
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -103,19 +114,37 @@ def fail(message: str) -> NoReturn:
 
 
 def get(url: str) -> bytes:
-    """Read one HTTPS URL with certificate verification.
+    """Read one HTTPS URL with certificate verification, following HTTPS redirects.
 
     Returns:
         The response body.
 
     """
-    if not url.startswith("https://"):
-        fail(f"not an HTTPS URL: {url}")
-    with urllib.request.urlopen(url, timeout=600) as response:  # ruff: ignore[suspicious-url-open-usage]  URL: checked to be https:// just above
-        body = response.read()
-    if not isinstance(body, bytes):
-        fail(f"non-bytes response body from {url}")
-    return body
+    context = ssl.create_default_context()
+    for _ in range(MAX_REDIRECTS + 1):
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname:
+            fail(f"not an HTTPS URL: {url}")
+        target = parts.path or "/"
+        if parts.query:
+            target = f"{target}?{parts.query}"
+        connection = http.client.HTTPSConnection(
+            parts.hostname, parts.port, timeout=600, context=context
+        )
+        try:
+            connection.request("GET", target, headers={"User-Agent": "elpis-lock"})
+            response = connection.getresponse()
+            body = response.read()
+            location = response.getheader("Location")
+        finally:
+            connection.close()
+        if response.status in REDIRECTS and location:
+            url = urllib.parse.urljoin(url, location)
+            continue
+        if response.status != HTTPStatus.OK:
+            fail(f"HTTP {response.status} from {url}")
+        return body
+    fail(f"too many redirects from {url}")
 
 
 class Links(HTMLParser):

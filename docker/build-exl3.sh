@@ -107,14 +107,33 @@ if [[ "$variant" == candidate-rebuilt || "$variant" == candidate-ext ]]; then
   # built shared object; its SHA-256 becomes the final image's label, and the
   # final stage recomposes the manifest from the installed object.
   snap="$scratch/patches"
-  mkdir -p -- "$snap/exl3" "$snap/exl3-ext/upstream-355c6ee"
+  mkdir -p -- "$snap/exl3" "$snap/exl3-ext"
   shopt -s nullglob
   cp -- "$root"/patches/exl3/{series,exl3-patches.json,apply.py} "$root"/patches/exl3/*.patch \
     "$snap/exl3/"
   cp -- "$root"/patches/exl3-ext/{series,exl3-ext.json,ext.py} "$root"/patches/exl3-ext/*.patch \
     "$snap/exl3-ext/"
   shopt -u nullglob
-  cp -- "$root/patches/exl3-ext/upstream-355c6ee/setup.py" "$snap/exl3-ext/upstream-355c6ee/"
+  # Upstream setup.py comes from the pinned source archive (docker/base/sources.lock);
+  # ext.py checks it against exl3-ext.json's setup_py_sha256.
+  python3 -I -B -c '
+import hashlib, json, sys, tarfile
+lock, inputs, out = sys.argv[1:]
+pin = json.load(open(lock, "rb"))["archives"]["exllamav3"]
+path = inputs + "/" + pin["file"]
+if hashlib.sha256(open(path, "rb").read()).hexdigest() != pin["sha256"]:
+    sys.exit(f"build-exl3.sh: {path} differs from docker/base/sources.lock")
+with tarfile.open(path, "r:gz") as archive:
+    root = archive.next()
+    top = root.name.rstrip("/") if root is not None and root.isdir() else ""
+    if not top or "/" in top:
+        sys.exit(f"build-exl3.sh: {path} has no single top directory")
+    member = archive.getmember(top + "/setup.py")
+    source = archive.extractfile(member) if member.isfile() else None
+    if source is None:
+        sys.exit(f"build-exl3.sh: {path} has no regular setup.py")
+    open(out, "xb").write(source.read())
+' "$root/docker/base/sources.lock" "$root/build/base-inputs" "$snap/exl3-ext/setup.py"
   build_args+=(--build-context "patches=$snap")
   kind=rebuilt
   [[ "$variant" == candidate-ext ]] && kind=patched

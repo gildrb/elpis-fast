@@ -12,10 +12,12 @@ patches/exl3/apply.py):
     python3 -I -B ext.py pin <pristine-engine-root>
 
 prepare checks the installed engine against exl3-ext.json: the package root, the
-SHA-256 listing of the whole compiled source tree, and the vendored upstream
-setup.py. The installed shared object must equal the hash that the base image
-recorded for its own build (extension.base_record, written by
-docker/base/manifest.py; nvcc output differs from build to build, so no global
+SHA-256 listing of the whole compiled source tree, and the upstream setup.py
+that docker/build-exl3.sh stages next to this file from the pinned source
+archive (docker/base/sources.lock). The installed shared object must equal the
+hash that the base image recorded for its own build (extension.base_record,
+written by docker/base/manifest.py; nvcc output differs from build to build, so
+no global
 pin exists). For `patched` it then checks the series, every patch and every
 pre-image, applies the series in place with the strict hunk rules of
 patches/exl3/apply.py, and requires every post-image. Finally it lays out
@@ -361,7 +363,7 @@ def prepare(variant: str, build: Path) -> None:
         fail("installed extension sources differ from the pinned upstream tree")
     setup_py = EXT_DIR / safe_relative(text_value(source["setup_py"], "setup.py"))
     if digest(setup_py) != pinned(source["setup_py_sha256"], "setup_py_sha256"):
-        fail("vendored setup.py differs from its pin")
+        fail("staged upstream setup.py differs from its pin")
     extension = mapping(manifest["extension"], "extension")
     so, base_sha256 = base_extension(extension)
     if digest(so) != base_sha256:

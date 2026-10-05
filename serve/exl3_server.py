@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import math
 import os
 import pathlib
@@ -20,6 +21,7 @@ import stat
 import sys
 import threading
 import time
+import traceback
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -29,6 +31,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, ClassVar, Protocol, override
 
 import regex
+import torch
+from exllamav3 import Cache, Config, Job, Model, Tokenizer
+from exllamav3 import Generator as NativeGenerator
+from exllamav3.cache import CacheLayer_quant
+from exllamav3.generator.sampler.presets import ArgmaxSampler
 from jinja2 import TemplateError
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -36,13 +43,23 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
+# The persistent prefix cache module comes from patch 9501b, which only the
+# candidate-ext engine carries; other engines must run with persistence off.
+PERSIST_MODULE = "exllamav3.generator.persist"
+try:
+    from exllamav3.generator.persist import PersistError, PrefixStore
+except ModuleNotFoundError as missing:
+    if missing.name != PERSIST_MODULE:
+        raise
+    PERSIST_INSTALLED = False
+else:
+    PERSIST_INSTALLED = True
+
 if TYPE_CHECKING:
     import socket
     from collections.abc import Buffer, Generator, Iterable, Iterator
-    from types import ModuleType
+    from types import TracebackType
 
-    import torch
-    from exllamav3.generator.persist import PrefixStore
     from jsonschema.protocols import Validator
 
 type JSON = str | int | float | bool | list[JSON] | dict[str, JSON] | None
@@ -506,7 +523,6 @@ class Descending(Protocol):
         instance: JSON,
         schema: JSON,
         path: str | None = None,
-        schema_path: str | None = None,
     ) -> Iterable[object]:
         """Validate a child instance against a subschema."""
         ...
@@ -546,9 +562,7 @@ def bounded_pattern_properties(
     for pattern, subschema in patterns.items():
         for key, value in instance.items():
             if pattern_search(pattern, key):
-                yield from checked_errors(
-                    validator.descend(value, subschema, path=key, schema_path=pattern)
-                )
+                yield from checked_errors(validator.descend(value, subschema, path=key))
 
 
 def bounded_additional_properties(
@@ -1513,6 +1527,63 @@ def log_line(line: object) -> None:
     sys.stdout.flush()
 
 
+class RedactedTracebackFormatter(logging.Formatter):
+    """Format tracebacks as frames and exception types, without exception messages.
+
+    Messages can carry request bodies or model text, which the log must not hold.
+    """
+
+    @override
+    def formatException(
+        self,
+        ei: tuple[type[BaseException], BaseException, TracebackType | None]
+        | tuple[None, None, None],
+    ) -> str:
+        chain: list[str] = []
+        seen: set[int] = set()
+        error = ei[1]
+        while error is not None and id(error) not in seen:
+            seen.add(id(error))
+            frames = "".join(traceback.format_tb(error.__traceback__))
+            chain.append(
+                f"Traceback (most recent call last):\n{frames}"
+                f"{type(error).__module__}.{type(error).__qualname__}"
+            )
+            error = error.__cause__ or (
+                None if error.__suppress_context__ else error.__context__
+            )
+        return "\n\nThe above exception led to:\n\n".join(reversed(chain))
+
+
+class LogLineHandler(logging.Handler):
+    """Emit log records through `log_line`, like every other server log line."""
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            log_line(self.format(record))
+        except (OSError, ValueError):
+            self.handleError(record)
+
+
+def traceback_logger() -> logging.Logger:
+    """Build the logger for last-resort handlers: message line plus redacted frames.
+
+    Returns:
+        The module logger, writing only through `log_line`.
+
+    """
+    handler = LogLineHandler()
+    handler.setFormatter(RedactedTracebackFormatter("%(message)s"))
+    logger = logging.getLogger(__name__)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+LOGGER = traceback_logger()
+
+
 MAX_ENV_SECONDS = 86400
 
 
@@ -1601,9 +1672,7 @@ def file_digest(path: str) -> str | None:
         return None
 
 
-def prefix_binding(
-    args: argparse.Namespace, torch_: ModuleType
-) -> dict[str, JSON] | None:
+def prefix_binding(args: argparse.Namespace) -> dict[str, JSON] | None:
     """Bind persisted K/V and recurrent bytes to everything outside cache geometry.
 
     Returns:
@@ -1641,10 +1710,10 @@ def prefix_binding(
             "cq": args.cq,
         },
         "runtime": {
-            "torch": str(torch_.__version__),
-            "cuda": str(torch_.version.cuda),
-            "gpu": str(torch_.cuda.get_device_name(0)),
-            "capability": list(torch_.cuda.get_device_capability(0)),
+            "torch": str(torch.__version__),
+            "cuda": str(torch.version.cuda),
+            "gpu": str(torch.cuda.get_device_name(0)),
+            "capability": list(torch.cuda.get_device_capability(0)),
             "driver": driver,
         },
         "env": {
@@ -1702,7 +1771,7 @@ class Server:
         self.last_save = -math.inf
         self.persist = self.open_prefix_cache(args) if args.prefix_cache else None
         threading.Thread(target=self._worker, daemon=True).start()
-        free, total = self.torch.cuda.mem_get_info()
+        free, total = torch.cuda.mem_get_info()
         log_line(
             f"[serve] READY in {time.monotonic() - start:.0f}s, "
             f"VRAM={(total - free) / 1e9:.2f} GB"
@@ -1718,14 +1787,6 @@ class Server:
             RuntimeError: The generator's draft window differs from the cache.
 
         """
-        import torch  # ruff: ignore[import-outside-top-level]  lazy torch/exllamav3 (CUDA) import, deferred until the engine loads
-        from exllamav3 import Cache, Config, Generator, Job, Model, Tokenizer  # ruff: ignore[import-outside-top-level]  lazy torch/exllamav3 (CUDA) import, deferred until the engine loads
-        from exllamav3.cache import CacheLayer_quant  # ruff: ignore[import-outside-top-level]  lazy torch/exllamav3 (CUDA) import, deferred until the engine loads
-        from exllamav3.generator.sampler.presets import ArgmaxSampler  # ruff: ignore[import-outside-top-level]  lazy torch/exllamav3 (CUDA) import, deferred until the engine loads
-
-        self.torch = torch
-        self.job_type = Job
-        self.sampler_type = ArgmaxSampler
         self.model_name = args.model_name
         self.max_model_len = args.max_model_len
         target_config = Config.from_directory(args.target)
@@ -1758,7 +1819,7 @@ class Server:
             max_batch_size=1,
         )
         draft_model.load(progressbar=False)
-        self.gen = Generator(
+        self.gen = NativeGenerator(
             model,
             cache,
             self.tokenizer,
@@ -1852,7 +1913,7 @@ class Server:
             except (ValueError, TypeError, TemplateError) as exc:
                 msg = "Messages could not be rendered by the model chat template"
                 raise APIError(msg) from exc
-        if not isinstance(ids, self.torch.Tensor):
+        if not isinstance(ids, torch.Tensor):
             msg = "Native chat template did not return a token-ID tensor"
             raise InvariantTypeError(msg)
         self.check_context(ids)
@@ -1902,15 +1963,18 @@ class Server:
             The engine's PrefixStore, or None when persistence is off or unusable.
 
         Raises:
+            ModuleNotFoundError: The engine lacks the persist module (patch 9501b).
             ValueError: The permutation test hook is not a non-negative integer.
 
         """
         if not env_flag(PERSIST_ENV, default=True):
             log_line(f"[persist] disabled by {PERSIST_ENV}=0")
             return None
-        from exllamav3.generator.persist import PersistError, PrefixStore  # ruff: ignore[import-outside-top-level]  lazy exllamav3 (CUDA) import, only when persistence is enabled
+        if not PERSIST_INSTALLED:
+            msg = f"No module named {PERSIST_MODULE!r}"
+            raise ModuleNotFoundError(msg, name=PERSIST_MODULE)
 
-        binding = prefix_binding(args, self.torch)
+        binding = prefix_binding(args)
         if binding is None:
             log_line(
                 "[persist] image identity unknown (launch gate --candidate-image or "
@@ -1982,10 +2046,12 @@ class Server:
         self.last_save = time.monotonic()
         try:
             capture = store.capture(verify=self.persist_debug)
-        except Exception as exc:  # ruff: ignore[blind-except]  last-resort handler: any capture failure disables persistence instead of killing the server
+        except Exception as exc:
+            # Last resort: any capture failure disables persistence, not the server.
             store.enabled = False
-            log_line(
-                f"[persist] capture failed ({type(exc).__name__}); persistence disabled"
+            LOGGER.exception(
+                "[persist] capture failed (%s); persistence disabled",
+                type(exc).__name__,
             )
             return
         if capture is None:
@@ -2074,10 +2140,10 @@ class Server:
         ids = pending.input_ids
         if ids.ndim == 1:
             ids = ids.unsqueeze(0)
-        job = self.job_type(
+        job = Job(
             input_ids=ids,
             max_new_tokens=pending.options.max_tokens,
-            sampler=self.sampler_type(),
+            sampler=ArgmaxSampler(),
             stop_conditions=self.stop_ids,
             decode_special_tokens=not pending.options.skip_special_tokens,
             identifier=pending.identifier,
@@ -2169,10 +2235,13 @@ class Server:
                 pending.result = self._run_job(pending)
             except ShutdownError as exc:
                 pending.error = exc
-            except Exception as exc:  # ruff: ignore[blind-except]  last-resort handler: worker failure is recorded and returned to the waiting request
+            except Exception as exc:
+                # Last resort: record the failure and return it to the waiting request.
                 self.failure = exc
                 pending.error = exc
-                log_line(f"[serve] native worker failure: {type(exc).__name__}")
+                LOGGER.exception(
+                    "[serve] native worker failure: %s", type(exc).__name__
+                )
             finally:
                 pending.event.set()
                 self.queue.task_done()
@@ -2590,8 +2659,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(exc)
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
-        except Exception as exc:  # ruff: ignore[blind-except]  last-resort handler: unexpected request failure becomes a 500 response
-            log_line(f"[serve] request failure: {type(exc).__name__}")
+        except Exception as exc:
+            # Last resort: an unexpected request failure becomes a 500 response.
+            LOGGER.exception("[serve] request failure: %s", type(exc).__name__)
             self.send_error_json(
                 APIError("Internal server error", 500, "internal_error")
             )
@@ -2692,7 +2762,7 @@ class Handler(BaseHTTPRequestHandler):
                         "tokenizer vocabulary"
                     )
                     raise APIError(msg)
-                ids = self.engine.torch.tensor([tokens], dtype=self.engine.torch.long)
+                ids = torch.tensor([tokens], dtype=torch.long)
             else:
                 msg = (
                     "prompt must be a string, a token-ID list, or one nested "

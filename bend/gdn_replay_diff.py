@@ -23,7 +23,6 @@ import ast
 import difflib
 import hashlib
 import json
-import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -70,7 +69,11 @@ HEAD_DIM = 128  # gdn.cu:907, 2931
 CONV1D_MAX_K = 16  # gdn.cu:1828
 CONV_BA_MAX_S = 16  # gdn.cu:2268
 CONV_BA_THREADS = 128  # gdn.cu:2469
-RULE_INPLACE, RULE_HISTORY, RULE_VERIFY, RULE_COMMIT = 0, 1, 2, 3  # gdn.cu:883
+RULE_INPLACE, RULE_VERIFY, RULE_COMMIT = (
+    0,
+    2,
+    3,
+)  # gdn.cu:883 (RULE_HISTORY = 1 unported)
 MAX_V_HEADS = 65535  # gdn.cu:2969-2970
 STATE_REWIND_ALIGN = 4  # gdn.cu:2905
 
@@ -1368,13 +1371,14 @@ def bend_table() -> str:
 
     """
     bend = source_link.bend()
-    p = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
+    p = source_link.run(
         [bend, TABLE],
         cwd=REPO,
         capture_output=True,
         text=True,
         timeout=BEND_TIMEOUT,
         check=False,
+        cpu_heavy=False,
     )
     if p.returncode != 0:
         fail(f"{bend} {TABLE} exited {p.returncode}: {p.stderr.strip()}")

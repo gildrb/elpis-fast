@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Self, final
 
+from bench import process
+
 NANOSECONDS = 1_000_000_000
 MIN_INTERVAL_SECONDS = 0.1
 MAX_INTERVAL_SECONDS = 60
@@ -241,7 +243,7 @@ class PowerSampler:
         if executable is None:
             return None, "nvidia_smi_not_found"
         try:
-            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: nvidia-smi from PATH + fixed power.draw query, no shell
+            result = process.run(
                 [
                     executable,
                     f"--id={self.gpu}",
@@ -249,7 +251,6 @@ class PowerSampler:
                     "--format=csv,noheader,nounits",
                 ],
                 capture_output=True,
-                text=True,
                 check=False,
                 timeout=2,
             )

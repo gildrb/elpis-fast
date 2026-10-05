@@ -22,7 +22,6 @@ usage: hgemm_wide_diff.py EXT_DIR
 Exit 0 and "hgemm_wide_diff: OK" iff all three steps pass.
 """
 
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -402,8 +401,8 @@ def build_and_run(prog: str) -> tuple[str, str]:
         src = Path(td) / "hw_ref.cpp"
         src.write_text(prog)
         exe = Path(td) / "hw_ref"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-            source_link.locked(["c++", "-std=c++17", "-O1", "-o", str(exe), str(src)]),
+        r = source_link.run(
+            ["c++", "-std=c++17", "-O1", "-o", str(exe), str(src)],
             capture_output=True,
             text=True,
             check=False,
@@ -415,17 +414,17 @@ def build_and_run(prog: str) -> tuple[str, str]:
                 + "\n"
             )
             sys.exit(1)
-        ref = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(exe)], capture_output=True, text=True, check=True
+        ref = source_link.run(
+            [str(exe)], capture_output=True, text=True, check=True, cpu_heavy=False
         ).stdout
         tb = Path(td) / "hw_table"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([
+        r = source_link.run(
+            [
                 source_link.bend(),
                 str(HERE / "HGEMM_WIDE_TABLE.bend"),
                 "-o",
                 str(tb),
-            ]),
+            ],
             capture_output=True,
             text=True,
             cwd=HERE,
@@ -438,8 +437,8 @@ def build_and_run(prog: str) -> tuple[str, str]:
                 + "\n"
             )
             sys.exit(1)
-        got = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(tb)], capture_output=True, text=True, check=True
+        got = source_link.run(
+            [str(tb)], capture_output=True, text=True, check=True, cpu_heavy=False
         ).stdout
     return ref, got
 

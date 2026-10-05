@@ -23,6 +23,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from bench import process
 from bench.power import NANOSECONDS, PowerSampler, clock_anchor, integrate_power
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ TRUNCATING_STOP_CONDITIONS = frozenset({
 })
 COST_SCOPE = "whole_native_cli_including_startup_scoring_failures_retries_teardown"
 SUCCESS_DEFINITION = "single_trace_weighted_reward_exactly_1_and_episode_and_trace_ok"
+SOLVED_THRESHOLD = 1.0
 ATTRIBUTION_SCOPE = (
     "persisted_trace_envelopes_only_not_discarded_retries_or_full_episodes"
 )
@@ -257,7 +259,11 @@ def observe_episode(value: object, ordinal: int) -> EpisodeObservation:
     weighted_reward = rewards[0] if len(rewards) == 1 else None
     success = False if not ok else None
     if weighted_reward is not None and 0 <= weighted_reward <= 1:
-        success = ok and traces[0].get("ok") is True and weighted_reward == 1.0  # ruff: ignore[float-equality-comparison]  reward is exactly 1.0 only for full success; partial credit must not count
+        # Upstream "solved" (verifiers envs/best_of_n: reward >= threshold, default
+        # 1.0). Inside [0, 1] that is reward exactly 1; partial credit never counts.
+        success = (
+            ok and traces[0].get("ok") is True and weighted_reward >= SOLVED_THRESHOLD
+        )
     return EpisodeObservation(
         ordinal=ordinal,
         operational_ok=ok,
@@ -380,10 +386,9 @@ class NativeProcess:
     def run(self, command: list[str], cwd: str) -> None:
         """Run the command in its own session, recording any launch failure."""
         try:
-            with subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: native eval command assembled by this runner from its arguments, no shell
-                command,
-                cwd=cwd,
-                start_new_session=True,
+            argv = [process.resolve(command[0], cwd=cwd), *command[1:]]
+            with process.start(
+                argv, process.Launch(cwd=cwd, start_new_session=True)
             ) as child:
                 self.supervise(child)
         except OSError:

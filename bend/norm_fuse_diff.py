@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -23,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import source_link
 
 if TYPE_CHECKING:
+    import subprocess
     from types import ModuleType
 
 HERE = Path(__file__).resolve().parent
@@ -37,7 +37,6 @@ PINNED = (
 )
 SHAPES = ((96, 2), (5120, 16))  # NORM_FUSE_TABLE.bend main
 SERVED_DIM = 5120
-SERVED_ROWS = range(1, 17)
 # `--mutate NAME` occupies two arguments
 MUTATE_ARGS = 2
 HELPERS = ("sum_sq4", "apply4", "apply4_nw", "reduce_dyn")
@@ -787,8 +786,8 @@ def compile_harness(work: Path, program: str) -> Path:
     src = work / "norm_fuse_harness.cpp"
     src.write_text(program)
     exe = work / "harness"
-    r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-        source_link.locked([
+    r = source_link.run(
+        [
             "clang++",
             "-std=c++20",
             "-O1",
@@ -797,7 +796,7 @@ def compile_harness(work: Path, program: str) -> Path:
             str(src),
             "-o",
             str(exe),
-        ]),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -818,13 +817,13 @@ def bend_table(work: Path) -> str:
 
     """
     exe_b = work / "table_bin"
-    r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-        source_link.locked([
+    r = source_link.run(
+        [
             source_link.bend(),
             str(REPO / TABLE),
             "-o",
             str(exe_b),
-        ]),
+        ],
         capture_output=True,
         text=True,
         cwd=REPO,
@@ -832,8 +831,8 @@ def bend_table(work: Path) -> str:
     )
     if r.returncode:
         fail("Bend table compile failed:\n" + r.stdout[-2000:] + r.stderr[-2000:])
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-        [str(exe_b)], capture_output=True, text=True, check=True
+    return source_link.run(
+        [str(exe_b)], capture_output=True, text=True, check=True, cpu_heavy=False
     ).stdout
 
 
@@ -916,11 +915,19 @@ def main(argv: list[str]) -> None:
         work = Path(scratch)
         pre, post = prepare(pristine, work, mutate)
         exe = compile_harness(work, harness(pre, post))
-        c_table = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(exe), "table"], capture_output=True, text=True, check=True
+        c_table = source_link.run(
+            [str(exe), "table"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cpu_heavy=False,
         ).stdout
-        own = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(exe), "ownership"], capture_output=True, text=True, check=False
+        own = source_link.run(
+            [str(exe), "ownership"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cpu_heavy=False,
         )
         b_table = bend_table(work)
     verdict = report(c_table, b_table, own)

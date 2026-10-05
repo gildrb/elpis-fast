@@ -30,7 +30,6 @@ Usage: python3 -B bend/mlp_m16_defer_diff.py TREE
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -39,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import source_link
 
 REPO = source_link.REPO
-G, KT1, PF = 164, 5120 // 16, 8
+G, KT1 = 164, 5120 // 16
 LANES = 32
 
 USAGE = (
@@ -230,8 +229,8 @@ def main(argv: list[str]) -> int:
         ("bend/MLP_M16_SCHED_TABLE.bend", "exl3_mlp_m16_sched.h"),
         ("bend/TAIL_M16_SCHED_TABLE.bend", "exl3_tail_m16_sched.h"),
     ):
-        out = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([source_link.bend(), tab]),
+        out = source_link.run(
+            [source_link.bend(), tab],
             cwd=REPO,
             capture_output=True,
             timeout=3600,

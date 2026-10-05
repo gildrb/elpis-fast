@@ -28,8 +28,7 @@ jq -e '
      (.path | test("^[A-Za-z0-9_-][A-Za-z0-9_./-]*$")) and
      (.path | split("/") | all(. != ".." and . != ".")) and
      (.size | type == "number") and .size > 0 and
-     ((.algorithm == "sha256" and (.hash | test("^[a-f0-9]{64}$"))) or
-      (.algorithm == "git-sha1" and (.hash | test("^[a-f0-9]{40}$"))))
+     (.algorithm == "sha256" and (.hash | test("^[a-f0-9]{64}$")))
    ] | all)
  ] | all) and
  ([."mrcr-v2"[] |
@@ -104,11 +103,8 @@ while IFS= read -r taskset; do
         path="$snapshot/$filename"
         [[ -f "$path" ]] || { printf 'Missing pinned data: %s\n' "$path" >&2; exit 1; }
         [[ $(wc -c <"$path") -eq "$size" ]]
-        if [[ "$algorithm" == sha256 ]]; then
-            actual=$(sha256sum -- "$path"); actual=${actual%% *}
-        else
-            actual=$(git hash-object --no-filters -- "$path")
-        fi
+        [[ "$algorithm" == sha256 ]] || { printf 'Unsupported hash algorithm: %s\n' "$algorithm" >&2; exit 1; }
+        actual=$(sha256sum -- "$path"); actual=${actual%% *}
         [[ "$actual" == "$expected" ]] || { printf 'Source hash mismatch: %s\n' "$path" >&2; exit 1; }
     done < <(jq -r --arg key "$taskset" '.huggingface[$key].files[] | [.path,.algorithm,.hash,.size] | @tsv' "$LOCK")
     # Upstream I3/LCB/GraphWalks/MMLU-Pro do not take revision arguments from

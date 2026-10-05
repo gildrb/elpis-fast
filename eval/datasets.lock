@@ -8,8 +8,8 @@
         {
           "path": "README.md",
           "size": 932,
-          "algorithm": "git-sha1",
-          "hash": "59939ff94847bc2b19093c526e61702a21df70ef"
+          "algorithm": "sha256",
+          "hash": "c1d82f7870ba18b505fad3027c5c6131bac989ed3e177e9fc23385b9b9b315b8"
         },
         {
           "path": "data/train-00000-of-00001.parquet",
@@ -26,20 +26,20 @@
         {
           "path": "README.md",
           "size": 448,
-          "algorithm": "git-sha1",
-          "hash": "01e9f122e1daf9c103c4a7b981995cdaccb454b8"
+          "algorithm": "sha256",
+          "hash": "43ac9ef26311be77671372031a242d031858ba836a6d79f323a1bac748e012ac"
         },
         {
           "path": "aime2025-I.jsonl",
           "size": 5764,
-          "algorithm": "git-sha1",
-          "hash": "553da6267ab95e09d7c590d4dc3383ccceed8cc2"
+          "algorithm": "sha256",
+          "hash": "b91b3c96f05d9635d2a0692b124ebe023c1ff59cb19c074275e6c4b349d0659e"
         },
         {
           "path": "aime2025-II.jsonl",
           "size": 6285,
-          "algorithm": "git-sha1",
-          "hash": "25ffdd6f619c4292b59817ad5afdbc7553723a3b"
+          "algorithm": "sha256",
+          "hash": "16a2dcfbbf9db1b11f8a69a3ba5e4cac73e3641b19a37e2307e9c12240bbed5e"
         }
       ]
     },
@@ -50,8 +50,8 @@
         {
           "path": "README.md",
           "size": 1692,
-          "algorithm": "git-sha1",
-          "hash": "3690d8310c681da89b8647eb32356b0e69bfc867"
+          "algorithm": "sha256",
+          "hash": "e04fa22c638a2706648c799c5f1932caebf592446bef7b35597df73116aae781"
         },
         {
           "path": "data/train-00000-of-00001.parquet",
@@ -68,8 +68,8 @@
         {
           "path": "README.md",
           "size": 1620,
-          "algorithm": "git-sha1",
-          "hash": "8ef1ac7962eea6a55742a0dcfa770c0cfbb1b8af"
+          "algorithm": "sha256",
+          "hash": "0ec9aa86b16bcf0450aea34c04fb6326a456a3771523bcae627fc99f4ef9b397"
         },
         {
           "path": "logic/train-00000-of-00001.parquet",
@@ -128,8 +128,8 @@
         {
           "path": "README.md",
           "size": 11723,
-          "algorithm": "git-sha1",
-          "hash": "29e49a8b4c80bb3701e56f69acd89197f0eea371"
+          "algorithm": "sha256",
+          "hash": "4bd710f67da3fa359a33edce1b4b5816b3de416c823c2624ba5e89c2557d2a47"
         },
         {
           "path": "data/test-00000-of-00001.parquet",
@@ -152,8 +152,8 @@
         {
           "path": "README.md",
           "size": 3184,
-          "algorithm": "git-sha1",
-          "hash": "47f35ee3923dddcba83a47c4802f764bf71be58a"
+          "algorithm": "sha256",
+          "hash": "8edff8afba221b1d2a99c46777f068c0888f5e93316028324d84112f039fb43c"
         },
         {
           "path": "graphwalks_128k_and_shorter.parquet",

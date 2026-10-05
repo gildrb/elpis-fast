@@ -6,9 +6,12 @@ Usage text: USAGE (printed on bad arguments).
 
 from __future__ import annotations
 
-import random
 import sys
+from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import detrand
 
 USAGE = (
     "Shared slot-weighted split-K partition (m16g fix and 8205). "
@@ -106,20 +109,6 @@ def owner_closed(x: int, total: int, g: Grid) -> int:
     return g.n_sm + (p - g.w0 * g.n_sm) // g.w1
 
 
-def max_contrib(groups: int, kt: int, g: Grid) -> int:
-    """Return the most blocks contributing to one group of kt iterations.
-
-    Returns:
-        The maximum contributor count over the groups.
-
-    """
-    total = groups * kt
-    return max(
-        owner_closed((i + 1) * kt - 1, total, g) - owner_closed(i * kt, total, g) + 1
-        for i in range(groups)
-    )
-
-
 def valid(total: int, g: Grid) -> bool:
     """Check the domain: positive weights, n_sm <= G <= 2 n_sm, nonempty slices.
 
@@ -135,7 +124,7 @@ def valid(total: int, g: Grid) -> bool:
     )
 
 
-def _check(total: int, g: Grid, rnd: random.Random) -> None:
+def _check(total: int, g: Grid, rnd: detrand.SplitMix64) -> None:
     """Check one valid configuration against the definitions.
 
     Raises:
@@ -163,7 +152,7 @@ def _check(total: int, g: Grid, rnd: random.Random) -> None:
 
 def self_test() -> None:
     """Check owner_closed and the (w, w) == v2 identity on fixed and random cases."""
-    rnd = random.Random(8205)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  seeded RNG generates reproducible self-test cases
+    rnd = detrand.SplitMix64(8205)
     cases = [
         (32 * 320, Grid(164, 82, 100, 93)),
         (28 * 320, Grid(164, 82, 100, 93)),

@@ -22,15 +22,13 @@ so ty resolves them. Serving runtime pins are separate from the upstream
 evaluation environment pins described in [eval/README.md](../eval/README.md).
 
 `ty check .` skips the files that import torch, exllamav3, JSON Schema or
-Verifiers (`[tool.ty.src] exclude`). Check them in their own environments.
-`IMAGE` is an image that `docker/build-exl3.sh candidate-ext` built from this
-checkout:
-
-```console
-docker run --rm --network none -v "$PWD:/w:ro" -v "$PWD/.venv/bin/ty:/usr/local/bin/ty:ro" -w /w --entrypoint ty "$IMAGE" check --python /opt/venv/bin/python3 serve/exl3_server.py bench/exl3_accept_latency.py
-nix develop . --no-write-lock-file -c eval/direct/setup
-nix develop . --no-write-lock-file -c uv run --locked --python python3.13 --no-managed-python ty check --python eval/direct/mrcr/.venv --python-version 3.12 eval/direct
-```
+Verifiers (`[tool.ty.src] exclude`). They are checked in their own
+environments, not skipped. `bash check.sh IMAGE` runs every gate: ruff, format
+and ty on the host, ty in `IMAGE` (an image that
+`docker/build-exl3.sh candidate-ext` built from this checkout) and ty in the
+`eval/direct` venv (`eval/direct/setup` makes it). CI
+(`.github/workflows/lint.yml`) runs the host gates on every push to `main` and
+every pull request.
 
 ## Policy
 
@@ -50,17 +48,19 @@ Q003), and trailing commas (COM812, COM819). Their named lint counterparts
 are disabled, not source-level errors. ISC001 and ISC002 remain enabled;
 the default multiline concatenation setting is formatter-compatible.
 One rule is off: `suspicious-subprocess-import` (S404) flags every
-`import subprocess`. `subprocess-without-shell-equals-true` (S603) stays on
-and checks every call. Ruff and ty skip
-`patches/exl3-ext/upstream-355c6ee/setup.py`: it is the upstream file,
-byte-pinned in `patches/exl3-ext/exl3-ext.json`. No other file exclusions,
-per-file exemptions or type ignores are added.
+`import subprocess`.
 
-A finding that only a workaround would silence gets a line suppression with
-its reason: `# ruff: ignore[<rule-name>]  <reason>`. Use the rule name, one
-line, one site. Today these are S603 calls whose argv is a list without a
-shell but not all literals, and single sites of S108, S310, PTH115, RUF069,
-S311, S324, PLC0415, BLE001 and PLR0913/PLR0917.
+No file exclusions, per-file exemptions, type ignores or workarounds. A
+finding is fixed in the code. The one exception is S603
+(`subprocess-without-shell-equals-true`): it flags every call whose argv is
+not all string literals, so no compliant form exists for a tool that runs
+compilers. Every process launch goes through one audited helper, and only the
+helper's call carries `# ruff: ignore[subprocess-without-shell-equals-true]`
+with its reason: `bend/source_link.py` `run` (every source link),
+`bench/process.py` `run` and `start` (bench and eval), and the single call in
+each of `bend/exl3_build.py`, `bend/build_toolchain.py` and
+`docker/base/lock.py`. Each helper validates argv: a list, an absolute
+executable, no shell, explicit `check`.
 `grep -rn 'ruff: ignore' --include='*.py' .` lists them all.
 
 ## Scope and honest failures
@@ -91,10 +91,15 @@ A source link compares a Bend model with the engine source text. It is
 evidence for `H_conform`, not a proof. Run every link from the repository root
 inside the dev shell. The shell supplies `bend` 2.0.35, `c++` (clang 19),
 `patch` and Python 3.13. Each link resolves `bend` from `PATH` and stops if
-`bend version` is not exactly `bend 2.0.35` (`bend/source_link.py`). If the
-host file `/tmp/cpu-lock.sh` exists, is yours and only you can write it, the
-links run their compilers and `bend` through it. If it does not exist, they run
-them directly.
+`bend version` is not exactly `bend 2.0.35` (`bend/source_link.py`). Every
+process a link starts goes through `source_link.run`, without a shell, with the
+executable resolved to an absolute path. Compilers and `bend` runs take the
+host CPU lock when `$XDG_RUNTIME_DIR/elpis-gpu.lock` exists, is a regular file
+you own, and neither group nor others can write it: the link waits while
+`$XDG_RUNTIME_DIR/elpis-gpu.pending` exists (a GPU timing window is queued),
+holds a shared `flock` on the lock file while the child runs, and lowers
+itself, and so every later child, to nice 19. Without such a lock file the
+links run them directly.
 
 ### 1. Make the engine trees
 

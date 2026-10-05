@@ -139,7 +139,7 @@ cp -R -- "$root/runtime" "$group/provenance/runtime"
 cp -- "$root/pyproject.toml" "$repo/flake.lock" "$group/provenance/"
 sha256sum -- "$root/scripts/"* >"$group/provenance/scripts.sha256"
 if [[ "$measure" == true ]]; then
-    cp -- "$root/measure.py" "$repo/bench/power.py" "$group/provenance/"
+    cp -- "$root/measure.py" "$repo/bench/power.py" "$repo/bench/process.py" "$group/provenance/"
 fi
 git -C "$repo" rev-parse HEAD >"$group/provenance/recipe-checkout.txt"
 git -C "$repo" status --porcelain=v1 >"$group/provenance/worktree-status.txt"

@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -977,8 +976,8 @@ def main(argv: list[str]) -> None:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(q))
         exe = Path(td) / "diff"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-            source_link.locked([
+        r = source_link.run(
+            [
                 "c++",
                 "-O0",
                 "-std=c++17",
@@ -987,7 +986,7 @@ def main(argv: list[str]) -> None:
                 "-o",
                 str(exe),
                 str(c),
-            ]),
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -995,14 +994,14 @@ def main(argv: list[str]) -> None:
         if r.returncode != 0:
             sys.stdout.write(f"{r.stderr[-3000:]}\n")
             fail("C++ harness does not compile")
-        cres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            source_link.locked([str(exe)]),
+        cres = source_link.run(
+            [str(exe)],
             capture_output=True,
             text=True,
             check=False,
         )
-    bres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-        source_link.locked([source_link.bend(), TABLE]),
+    bres = source_link.run(
+        [source_link.bend(), TABLE],
         cwd=HERE,
         capture_output=True,
         text=True,

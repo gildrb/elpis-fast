@@ -127,7 +127,7 @@ def files() -> list[str]:
                 path = Path(directory) / name
                 info = path.lstat()
                 if stat.S_ISLNK(info.st_mode):
-                    lines.append(f"l {os.readlink(path)} {path}\n")  # ruff: ignore[os-readlink]  records the raw link text in the manifest
+                    lines.append(f"l {path.readlink()} {path}\n")
                 elif stat.S_ISREG(info.st_mode) and path not in PER_BUILD:
                     mode = stat.S_IMODE(info.st_mode)
                     lines.append(f"f {digest(path)} {mode:04o} {path}\n")

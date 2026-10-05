@@ -29,14 +29,17 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http
+import http.client
 import importlib.util
 import io
 import json
 import shutil
+import ssl
 import sys
 import tarfile
 import tempfile
-import urllib.request
+import urllib.parse
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NoReturn
 
@@ -49,6 +52,16 @@ PACKAGE = "exllamav3"
 REVISION = "355c6ee10fbd25b79070316a81ea0708cc18155a"
 TOP = f"exllamav3-{REVISION}"
 MAX_ARCHIVE = 64 << 20
+MAX_REDIRECTS = 5
+FETCH_TIMEOUT = 120
+REDIRECT_STATUSES = frozenset({
+    http.HTTPStatus.MOVED_PERMANENTLY,
+    http.HTTPStatus.FOUND,
+    http.HTTPStatus.SEE_OTHER,
+    http.HTTPStatus.TEMPORARY_REDIRECT,
+    http.HTTPStatus.PERMANENT_REDIRECT,
+})
+USER_AGENT = "elpis-engine-trees"
 SHA256_HEX_LEN = 64
 DESCRIPTION = (
     "Lay out the stock and the patched ExLlamaV3 trees for the bend/*_diff.py "
@@ -113,17 +126,45 @@ def archive_pin() -> tuple[str, str]:
 def fetch(url: str) -> bytes:
     """Download the tarball over HTTPS with certificate checks.
 
+    Redirects are followed only to https URLs, at most MAX_REDIRECTS of them.
+
     Returns:
         The archive bytes.
 
     """
-    with urllib.request.urlopen(url, timeout=120) as response:  # ruff: ignore[suspicious-url-open-usage]  URL: checked to be https:// at the pinned revision before fetch
-        data = response.read(MAX_ARCHIVE + 1)
-    if not isinstance(data, bytes):
-        fail(f"{url}: response is not bytes")
-    if len(data) > MAX_ARCHIVE:
-        fail(f"{url}: archive larger than {MAX_ARCHIVE} bytes")
-    return data
+    for _ in range(MAX_REDIRECTS + 1):
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname:
+            fail(f"{url}: not an https URL")
+        target = parts.path or "/"
+        if parts.query:
+            target += f"?{parts.query}"
+        connection = http.client.HTTPSConnection(
+            parts.hostname,
+            parts.port,
+            timeout=FETCH_TIMEOUT,
+            context=ssl.create_default_context(),
+        )
+        try:
+            connection.request(
+                "GET",
+                target,
+                headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
+            )
+            response = connection.getresponse()
+            location = response.getheader("Location")
+            if response.status in REDIRECT_STATUSES and location:
+                url = urllib.parse.urljoin(url, location)
+                continue
+            if response.status != http.HTTPStatus.OK:
+                fail(f"{url}: HTTP {response.status} {response.reason}")
+            data = response.read(MAX_ARCHIVE + 1)
+        finally:
+            connection.close()
+        if len(data) > MAX_ARCHIVE:
+            fail(f"{url}: archive larger than {MAX_ARCHIVE} bytes")
+        return data
+    fail(f"{url}: more than {MAX_REDIRECTS} redirects")
 
 
 def extract(data: bytes, destination: Path) -> Path:

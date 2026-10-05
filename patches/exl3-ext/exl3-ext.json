@@ -5,7 +5,7 @@
     "root": "/opt/venv/lib/python3.13/site-packages/exllamav3",
     "tree": "exllamav3_ext",
     "tree_sha256": "ee8dd73d62aeb6737e447213d58f4a2f877019cb2b6b6d9009d91f09d0cca459",
-    "setup_py": "upstream-355c6ee/setup.py",
+    "setup_py": "setup.py",
     "setup_py_sha256": "50902829217e022bb3eadbda0cceef5bed5ea7ddc4cee04054b30ccc89dd6818"
   },
   "toolchain": {

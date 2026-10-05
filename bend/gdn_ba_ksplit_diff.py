@@ -42,7 +42,6 @@ Usage: python3 bend/gdn_ba_ksplit_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -856,8 +855,8 @@ def bend_table() -> str:
 
     """
     bend = source_link.bend()
-    bres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-        source_link.locked([bend, TABLE]),
+    bres = source_link.run(
+        [bend, TABLE],
         cwd=REPO,
         capture_output=True,
         text=True,

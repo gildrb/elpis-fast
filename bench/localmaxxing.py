@@ -31,20 +31,17 @@ Standard library only; the record and payloads carry no credentials.
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import json
-import os
 import platform
 import re
 import secrets
-import shutil
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from bench import process
 from bench.exl3 import (
     CONTEXT,
     DRAFT_PROPOSALS,
@@ -316,25 +313,6 @@ def catalog(path: Path) -> tuple[list[Prompt], list[str]]:
     return [found[identifier] for identifier in PROMPT_SHA256], names
 
 
-def executable(name: str) -> str:
-    """Resolve a host program on PATH.
-
-    Args:
-        name: The program name.
-
-    Returns:
-        The absolute path of the program.
-
-    Raises:
-        FileNotFoundError: If the program is not on PATH, as exec would report.
-
-    """
-    found = shutil.which(name)
-    if found is None:
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
-    return found
-
-
 def query(fields: tuple[str, ...]) -> dict[str, str]:
     """Read named nvidia-smi fields of the measured board.
 
@@ -345,15 +323,14 @@ def query(fields: tuple[str, ...]) -> dict[str, str]:
         ValueError: If nvidia-smi returns another number of fields.
 
     """
-    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: nvidia-smi from PATH + fixed query flags, no shell
+    result = process.run(
         [
-            executable("nvidia-smi"),
+            process.resolve("nvidia-smi"),
             f"--id={GPU}",
             f"--query-gpu={','.join(fields)}",
             "--format=csv,noheader,nounits",
         ],
         capture_output=True,
-        text=True,
         check=True,
         timeout=10,
     )
@@ -636,10 +613,9 @@ def installed_memory_bytes() -> int:
         ValueError: If DMI reports no memory or not a whole number of GiB.
 
     """
-    dmi = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: udevadm from PATH + fixed DMI sysfs path, no shell
-        [executable("udevadm"), "info", "/sys/devices/virtual/dmi/id"],
+    dmi = process.run(
+        [process.resolve("udevadm"), "info", "/sys/devices/virtual/dmi/id"],
         capture_output=True,
-        text=True,
         check=True,
         timeout=10,
     ).stdout

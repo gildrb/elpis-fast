@@ -27,6 +27,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from bench import process
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -69,7 +71,6 @@ INSTRUCTION = (
     "End of reference material. Write a careful technical summary of the main "
     "ideas above, then give one original worked Python example with tests."
 )
-PROMPTS = ROOT / "bench/throughput-prompts.jsonl"
 NONCE = "[measurement run {repetition} of {repetitions} at depth {depth}]"
 MAX_BODY = 64 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 1800
@@ -400,15 +401,15 @@ class Evidence:
             if "__pycache__" in path.parts:
                 continue
             if path.is_symlink():
-                target = os.readlink(path)  # ruff: ignore[os-readlink]  keeps the raw link text so absolute targets are rejected before resolving
-                if Path(target).is_absolute():
+                target = path.readlink()
+                if target.is_absolute():
                     msg = f"Evidence symlink must be relative: {path}"
                     raise ValueError(msg)
                 resolved = (path.parent / target).resolve(strict=True)
                 if not resolved.is_relative_to(base):
                     msg = f"Evidence symlink escapes its tree: {path}"
                     raise ValueError(msg)
-                result[path.relative_to(root).as_posix()] = "symlink:" + target
+                result[path.relative_to(root).as_posix()] = "symlink:" + str(target)
                 continue
             if path.is_file():
                 retained = self.retain(path)
@@ -438,10 +439,9 @@ def docker(*arguments: str, timeout: int = 60) -> str:
     if executable is None:
         raise ValueError(msg)
     try:
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: docker from PATH + fixed read-only query arguments, no shell
+        result = process.run(
             [executable, *arguments],
             capture_output=True,
-            text=True,
             timeout=timeout,
             check=True,
         )
@@ -791,14 +791,13 @@ def _gpu() -> dict[str, object]:
     if executable is None:
         raise ValueError(msg)
     try:
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: nvidia-smi from PATH + fixed query flags, no shell
+        result = process.run(
             [
                 executable,
                 "--query-gpu=" + ",".join(GPU_QUERY_FIELDS),
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
-            text=True,
             timeout=30,
             check=True,
         )
@@ -1396,7 +1395,7 @@ def _local_dataset(group: Path, taskset: NativeTaskset) -> dict[str, object] | N
     link = working_directory(group, taskset) / text(entry["repo"])
     if not (
         link.is_symlink()
-        and os.readlink(link) == str(snapshot)  # ruff: ignore[os-readlink]  compares the raw link text with the recorded snapshot path
+        and link.readlink() == snapshot
         and link.resolve(strict=True) == snapshot.resolve(strict=True)
     ):
         msg = f"Local dataset directory is not the verified snapshot: {link}"
@@ -1502,7 +1501,7 @@ def _native_plan(provenance: Path, taskset: NativeTaskset) -> dict[str, object]:
         msg = f"{taskset.name} launch differs from its profile beyond the sandbox pin"
         raise ValueError(msg)
     try:
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: eval/.venv python -I + embedded NATIVE_PLAN script and repo paths, no shell
+        result = process.run(
             [
                 str(EVAL / ".venv/bin/python"),
                 "-I",
@@ -1514,11 +1513,10 @@ def _native_plan(provenance: Path, taskset: NativeTaskset) -> dict[str, object]:
                 json.dumps(dataset_overrides(taskset)),
                 taskset.pinned_module or "",
             ],
-            cwd=working_directory(provenance.parent, taskset),
-            capture_output=True,
-            text=True,
-            timeout=PLAN_TIMEOUT_SECONDS,
             check=False,
+            timeout=PLAN_TIMEOUT_SECONDS,
+            capture_output=True,
+            launch=process.Launch(cwd=working_directory(provenance.parent, taskset)),
         )
     except subprocess.TimeoutExpired as error:
         msg = f"Pinned offline {taskset.name} selection did not finish"
@@ -1553,19 +1551,10 @@ def _dataset_file(snapshot: Path, raw: dict[str, object]) -> tuple[Path, str]:
         msg = f"Pinned dataset size differs: {path}"
         raise ValueError(msg)
     sha = digest(path)
-    algorithm = text(raw["algorithm"])
-    if algorithm == "sha256":
-        actual = sha
-    else:
-        if algorithm != "git-sha1":
-            msg = "Unknown pinned dataset hash algorithm"
-            raise ValueError(msg)
-        blob = hashlib.sha1(f"blob {size}\0".encode())  # ruff: ignore[hashlib-insecure-hash-function]  git blob sha1 checked against the pinned Hub dataset hashes, not for security
-        with path.open("rb") as stream:
-            while chunk := stream.read(1024 * 1024):
-                blob.update(chunk)
-        actual = blob.hexdigest()
-    if actual != text(raw["hash"]):
+    if text(raw["algorithm"]) != "sha256":
+        msg = "Unknown pinned dataset hash algorithm"
+        raise ValueError(msg)
+    if sha != text(raw["hash"]):
         msg = f"Pinned dataset bytes differ: {path}"
         raise ValueError(msg)
     return path, sha

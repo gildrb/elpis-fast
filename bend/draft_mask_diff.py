@@ -32,7 +32,6 @@ import hashlib
 import operator
 import re
 import resource
-import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Iterable
@@ -605,13 +604,13 @@ def bend_table(path: str | None) -> str:
         return Path(path).read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as d:
         exe = Path(d) / "table"
-        r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-            source_link.locked([
+        r = source_link.run(
+            [
                 source_link.bend(),
                 str(HERE / "DRAFT_MASK_TABLE.bend"),
                 "-o",
                 str(exe),
-            ]),
+            ],
             capture_output=True,
             text=True,
             cwd=HERE,
@@ -624,8 +623,12 @@ def bend_table(path: str | None) -> str:
         resource.setrlimit(
             resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
         )
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            [str(exe), "--gpu", "off"], capture_output=True, text=True, check=True
+        return source_link.run(
+            [str(exe), "--gpu", "off"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cpu_heavy=False,
         ).stdout
 
 

@@ -38,6 +38,7 @@ import struct
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 SCHEMA = "elpis-exl3-bend-tree-accept/1"
 TABLE_NAME = "exl3_tree_accept_table.txt"
@@ -79,10 +80,29 @@ FIRST_VERDICT = 2
 EDGE_VERDICT = (7, False, 6)
 PREFIX = "EXL3 Bend tree acceptance: "
 
-AcceptTree = Callable[
-    [Sequence[int], Sequence[int], Sequence[int], Sequence[int], int, int],
-    tuple[int, bool, int],
-]
+
+class TreeRequest(NamedTuple):
+    """One tree verify round to decide; immutable and cheap to build per round.
+
+    Attributes:
+        verify_ids: The ROWS target ids.
+        tokens: The ROWS drafted tokens.
+        parents: The ROWS-row parent array.
+        stop_ids: Up to MAX_STOPS stop ids.
+        budget: The remaining token budget.
+        checkpoint: The forced stop position, 0 for none.
+
+    """
+
+    verify_ids: Sequence[int]
+    tokens: Sequence[int]
+    parents: Sequence[int]
+    stop_ids: Sequence[int]
+    budget: int
+    checkpoint: int
+
+
+AcceptTree = Callable[[TreeRequest], tuple[int, bool, int]]
 Derive = Callable[[Sequence[int]], bytes]
 
 
@@ -187,20 +207,28 @@ def render(accept_tree: AcceptTree, derive: Derive) -> str:
             tokens = [0] + [
                 100 + parent[c] if mask >> (c - 1) & 1 else 99 for c in range(1, ROWS)
             ]
-            cells.append(glyph(accept_tree(verify, tokens, parent, (), 262144, 0)))
+            cells.append(
+                glyph(accept_tree(TreeRequest(verify, tokens, parent, (), 262144, 0)))
+            )
         full = [0] + [100 + parent[c] for c in range(1, ROWS)]
         rules = [
-            glyph(accept_tree(verify, full, parent, (), budget, checkpoint))
+            glyph(
+                accept_tree(TreeRequest(verify, full, parent, (), budget, checkpoint))
+            )
             for budget in range(1, 10)
             for checkpoint in range(ROWS)
         ]
         rules += [
-            glyph(accept_tree(verify, full, parent, (100 + r,), 262144, 0))
+            glyph(accept_tree(TreeRequest(verify, full, parent, (100 + r,), 262144, 0)))
             for r in range(ROWS)
         ]
         rules += [
             glyph(
-                accept_tree(verify, full, parent, (107, 106, 105, 104)[:n], 262144, 0)
+                accept_tree(
+                    TreeRequest(
+                        verify, full, parent, (107, 106, 105, 104)[:n], 262144, 0
+                    )
+                )
             )
             for n in range(MAX_STOPS + 1)
         ]
@@ -269,27 +297,15 @@ class TreeAcceptor:
         self._parents = (ctypes.c_int64 * ROWS)()
         self._desc = (ctypes.c_uint8 * DESC_BYTES)()
 
-    def accept_tree(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]  accept_tree signature is the ABI called by engine patch 0006
-        self,
-        verify_ids: Sequence[int],
-        tokens: Sequence[int],
-        parents: Sequence[int],
-        stop_ids: Sequence[int],
-        budget: int,
-        checkpoint: int,
-    ) -> tuple[int, bool, int]:
+    def accept_tree(self, request: TreeRequest) -> tuple[int, bool, int]:
         """Decide one tree verify round along the maximal matching path.
 
-        The caller commits verify_ids[path[i]] for i < count, where path is
-        the maximal matching path and last = path[count - 1].
+        The caller commits request.verify_ids[path[i]] for i < count, where
+        path is the maximal matching path and last = path[count - 1].
 
         Args:
-            verify_ids: The ROWS target ids.
-            tokens: The ROWS drafted tokens.
-            parents: The ROWS-row parent array.
-            stop_ids: Up to MAX_STOPS stop ids.
-            budget: The remaining token budget.
-            checkpoint: The forced stop position, 0 for none.
+            request: The round's verify ids, tokens, parents, stop ids,
+                budget and checkpoint.
 
         Returns:
             The (count, eos, last) verdict.
@@ -299,6 +315,7 @@ class TreeAcceptor:
             TypeError: If the leaf returns a non-integer.
 
         """
+        verify_ids, tokens, parents, stop_ids, budget, checkpoint = request
         stops = len(stop_ids)
         if len(verify_ids) != ROWS or len(tokens) != ROWS or len(parents) != ROWS:
             msg = f"verify ids, tokens and parents must each hold {ROWS} rows"
@@ -367,9 +384,7 @@ class TreeAcceptor:
         return bytes(self._desc)
 
 
-def domain(
-    accept_tree: Callable[..., tuple[int, bool, int]], derive: Callable[..., bytes]
-) -> None:
+def domain(accept_tree: AcceptTree, derive: Callable[..., bytes]) -> None:
     """Check the loaded calls accept the domain's edges and reject just past them.
 
     Args:
@@ -382,7 +397,9 @@ def domain(
     """
     top = ID_LIMIT - 1
     chain = [-1, 0, 1, 2, 3, 4, 5, 6]
-    edge = accept_tree([top] * 8, [top] * 8, chain, (0, 1, 2, 3), BUDGET_LIMIT, 7)
+    edge = accept_tree(
+        TreeRequest([top] * 8, [top] * 8, chain, (0, 1, 2, 3), BUDGET_LIMIT, 7)
+    )
     if edge != EDGE_VERDICT:
         msg = "leaf rejects or misjudges the domain's upper edges"
         raise ValueError(reason(msg))
@@ -411,7 +428,7 @@ def domain(
     ]
     for arguments in outside:
         try:
-            accept_tree(*arguments)
+            accept_tree(TreeRequest._make(arguments))
         except ValueError:
             continue
         msg = f"leaf accepted out-of-domain call {arguments!r}"

@@ -46,7 +46,6 @@ Usage: python3 bend/attn_chunk_diff.py [--mutate NAME] ENGINE_PACKAGE_DIR
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -58,6 +57,7 @@ import pysubset
 import source_link
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Callable
 
 REPO = source_link.REPO
@@ -754,8 +754,8 @@ def run_c(src: dict[str, str]) -> subprocess.CompletedProcess[str]:
         c = Path(td) / "diff.cpp"
         c.write_text(c_program(src["cuh"], src["cu"], src["gr"], src["cpp"]))
         exe = Path(td) / "diff"
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: C++ compiler from the nix shell building the generated harness in a private temp dir, no shell
-            source_link.locked([
+        source_link.run(
+            [
                 "c++",
                 "-O2",
                 "-std=c++17",
@@ -763,12 +763,10 @@ def run_c(src: dict[str, str]) -> subprocess.CompletedProcess[str]:
                 "-o",
                 str(exe),
                 str(c),
-            ]),
+            ],
             check=True,
         )
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: binary this script just built in its private temp dir, no shell
-            source_link.locked([str(exe)]), capture_output=True, text=True, check=False
-        )
+        return source_link.run([str(exe)], capture_output=True, text=True, check=False)
 
 
 def main(argv: list[str]) -> None:
@@ -783,8 +781,8 @@ def main(argv: list[str]) -> None:
     check_no_writes(src["cu"])
     cres = run_c(src)
     ctext = cres.stdout + "".join(line + "\n" for line in host_lines(src["py"]))
-    bres = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend 2.0.35 + repo .bend table, no shell
-        source_link.locked([source_link.bend(), TABLE]),
+    bres = source_link.run(
+        [source_link.bend(), TABLE],
         cwd=REPO,
         capture_output=True,
         text=True,

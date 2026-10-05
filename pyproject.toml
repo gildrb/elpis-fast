@@ -20,8 +20,6 @@ required-version = "==0.16.10"
 target-version = "py313"
 line-length = 88
 preview = true
-# Upstream ExLlamaV3 file, byte-pinned in patches/exl3-ext/exl3-ext.json.
-extend-exclude = ["patches/exl3-ext/upstream-355c6ee"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -49,7 +47,6 @@ extra-paths = ["bend", "bend/gen"]
 # Checked in other environments (docs/development.md): the serving image
 # (torch, triton, exllamav3, jsonschema) and eval/direct/mrcr/.venv (verifiers).
 exclude = [
-    "patches/exl3-ext/upstream-355c6ee",
     "serve/exl3_server.py",
     "bench/exl3_accept_latency.py",
     "eval/direct",

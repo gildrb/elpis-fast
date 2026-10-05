@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -55,7 +54,9 @@ def run(cmd: list[str]) -> bytes:
         The captured stdout.
 
     """
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, timeout=1800, check=False)  # ruff: ignore[subprocess-without-shell-equals-true]  argv: pinned bend table or sys.executable reference script, no shell
+    proc = source_link.run(
+        cmd, cwd=REPO, capture_output=True, timeout=1800, check=False, cpu_heavy=False
+    )
     if proc.returncode != 0:
         fail(
             f"{' '.join(cmd)} exited {proc.returncode}: "

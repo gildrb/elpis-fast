@@ -44,7 +44,7 @@ USAGE = (
     "[KQ0 KQ2]   (ext 8207: KQ = k-tiles per iteration, 1 or 4)\n"
 )
 
-G, NSM, PF, GW, W = 164, 82, 8, 512, 8
+G, NSM, PF, GW = 164, 82, 8, 512
 K0, N0 = 6144, 5120  # tail phase 0 (o_proj)
 K1, N1 = 5120, 17408  # 8201 phase 1 (gate, up)
 K2, N2 = 17408, 5120  # 8201 phase 2 (down)
