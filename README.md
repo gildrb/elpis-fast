@@ -35,6 +35,8 @@ Quality gates (`Int8Gate` for prefill, `DecGate` for decode):
 | int8 Q·Kᵀ (shipped) | passes R2 and R3; strict P: P3 fails at 8K under R2; P2 at 8K unresolved under R3 |
 | int8 MLP (+ int8 Q·Kᵀ) | fails R2 at 8K: top-1 0.92907 < 0.94556, \|ΔNLL\| 0.2056 > 0.0804; R3 unresolved (C5 at 8K: interval −0.054 … +1.020); strict P1, P2 fail at 8K, 32K, 128K; not kept |
 | int8 MLP at 8K / 32K only, int8 Q·Kᵀ at 128K+ | R3 unresolved (same C5 at 8K); not kept |
+| int8 attention + GDN linears, MLP fp16 (5115) | +7 % prefill tok/s; R3 FAIL (C2 prompt KL at 8K / 32K / 128K, C5 at 8K / 32K / 128K); not kept |
+| int8 GDN linears only (5115, `EXL3_INT8_ATTN=0`) | +5 % prefill tok/s; R3 FAIL (C2 at 8K and 128K); not kept |
 | `DecGate` rule D1 (set before the runs) | R3's limits and bootstrap on the decode verify kernel: teacher-forced 512-token continuation in 8-row verify rounds after a cold prefill; 2 documents at 8K, 2 at 32K, 1 at 128K, 1 at 261,600; floors = Triton verify attention, half the split count |
 | decode int8 Q·Kᵀ (3032, shipped) | D1 PASS at 8K, 32K, 128K, 262K; draft acceptance 3.507 vs band ≥ 3.398; strict P1-P3 fail or unresolved at some depths |
 | decode fp16-accumulated P·V (3032 mode 2, with or without int8 Q·Kᵀ) | D1 unresolved; not shipped (kill switch `EXL3_AV_FAST`) |
@@ -65,6 +67,7 @@ Autoresearch suite (`bash autoresearch.sh`, in process, no HTTP; 2026-10-05/06, 
 
 - Decode tok/s depends on the text (tokens per round). Ms per round is the speed of the engine. `pfast5` changes the text.
 - 262K decode: 128 tokens after a 262,000-token cold prefill.
+- Tried after `pfast5`, not kept: int8 linears in prefill (fail R3, see above); int8 P·V in prefill attention (3023: prefill +1.2 %, 262K TTFT 292.0 s; text changes, gain too small for a numerics change); 8192-row prefill merge (9506: exact, flat); checkpoint settle without a second host copy (9504: exact, flat). Data: [benchmarks §11](docs/benchmarks.md#11-autoresearch-pfast5-350-w-2026-10-06).
 
 Served suites, `pfast4` and elpis `p3031b` (#78) back to back, 2026-10-05, 350 W:
 
