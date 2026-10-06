@@ -4,6 +4,8 @@
 native context 262144, CQ3 cache) on one RTX 3090. `bash bench/lane.sh` runs the
 cold-prefill suite `exl3-native-prefill-ttft-v1` (§2a); the broad suite
 `exl3-native-broad-c1-request-v5` (§2) stays selectable with `--suite broad`.
+`bash autoresearch.sh` (build + in-process prefill and decode at 1K-262K) is the
+speed loop since 2026-10-05 (§11).
 
 | Protocol | Tasks | Declared power, clock offsets |
 |---|---|---|
@@ -718,3 +720,117 @@ elpis's target remains never less precise than stock ExLlamaV3; **#76/#77 curren
 - 3024 stratified failure: row-mod-4=0, L0/prefix 0 max error 0.00294231 vs stock 0.00286052 (+2.86 %) at q_len 2048 and 4096. **Unqualified, not kept** despite aggregate passes; native capacity, quality and TTFT remain pending.
 - Diagnostic 0081zz1 locates one fp16 store step at row 900 / head 9 / dimension 124. A CPU emulation of the kernels' running-max softmax reproduces the measured outputs bit for bit at all 16 diagnosed coordinates: the cause is fp16 rounding of P. A P-residual candidate (3027) is in development.
 - 3025: current candidate dropped for no useful production speed gain; not a precision fix. 3026 V-only staging: CUDA differential 4/4 (0081zz2); native 262,136 + 8 minimum allocator headroom 583 MiB (0081zz4; 0081zz3 failed its own sampler-gap check, not admitted). No candidate promoted.
+
+## 10. Phase 2: `pfast4` (350 W, 2026-10-05)
+
+Order for each change: law → proof → measurement. Keep rules, set before the runs:
+
+| Change kind | Keep if |
+|---|---|
+| Exact (same token ids) | ids identical; draft invariance 90/90; fault arm identical (where a recovery path exists); decode A/B: every candidate window below the median reference window |
+| Numerics | quality rule R3 PASS; TTFT ≤ 1.010 × reference at each depth and lower geomean; broad lane AIME 3/3, ≥ 12/20 |
+
+### Kept
+
+| Patch | Change | Law | Result |
+|---|---|---|---|
+| `9503f-qc-staging-round64-fast` | prefill staging scratch: span rounded up to a multiple of 64 pages (above 64 pages), not to a power of two | `qc_staging` | 262,136 + 8 tokens: minimum headroom 583 → 1,077 MiB, TTFT 318.5 → 309.3 s; prefill state, ids, rounds identical |
+| `9503b-prefill-m4096-stage1088` | stage bound 1,088 pages: with 9503f, the 4096-row merge runs for every prompt up to 262,143 tokens | `prefill_membound`, `qc_staging` | with 9503f: TTFT 5.437 / 22.257 / 117.754 / 311.608 s vs fresh `pfast2` 5.441 / 22.448 / 118.563 / 312.873 s |
+| `9601-tree-verify-pipe` | tree verify inputs (TreeDesc, positions, embedded rows) staged on the device; host check after the verify launch; mismatch → discard, restore GDN conv windows, recompute | `tree_pipe` P1-P7b | decode −0.69 / −0.51 / −0.49 % ms per round at 1K / 8K / 32K (two sessions, pooled); ids identical |
+
+`pfast3` = `pfast2` + 9503f + 9503b. `pfast4` = `pfast3` + 9601. Image `qwen-inference:p2-int1` `sha256:4ac2ee57…` (measured).
+
+Final session, 2026-10-05 (decode A/B: `decode_ab.py`, 256 greedy tokens, 12 windows F1 I1 E1 I2 E2 F2 E3 F3 I3 I4 F4 E4, 120 s cool gap):
+
+| 350 W | `pfast3` (F) | `pfast4` (I) | elpis `p3031b` (E, #78) |
+|---|---|---|---|
+| Decode, median ms per round (mean of 4 windows), 1K / 8K / 32K | 25.557 / 26.117 / 28.286 | 25.352 / 25.979 / 28.175 | 25.640 / 26.283 / 28.538 |
+| Window spread, 1K / 8K / 32K | 1.04 / 0.23 / 0.40 % | 0.20 / 0.35 / 0.57 % | 0.41 / 0.26 / 0.59 % |
+| Tokens per round, 1K / 8K / 32K | 3.419 / 3.592 / 3.892 | 3.419 / 3.592 / 3.892 | 4.081 / 3.643 / 4.016 (other text) |
+| TTFT 8K / 32K / 128K / 262K s | 5.40 / 22.48 / 118.68 / 313.25 | 5.45 / 22.35 / 118.00 / 311.83 | 5.61 / 25.08 / 150.15 / 434.09 |
+| Prefill geomean tok/s | 1,198.3 | 1,200.0 | 1,003.4 |
+| GSM8K tok/s, tok/J (median of 3) | not run | 205.3, 0.630 | 193.7, 0.586 |
+
+- 9601 decision: every I window is below the median F window at each depth, in both sessions; at 32K one I window (28.259) is above one F window (28.238). 8K TTFT ×1.010 vs F: 9601 does not touch prefill; the earlier F run gave 5.44 s.
+- Draft invariance on `pfast4`: tree and chain, normal / capped / all-rejected draft, 90/90 identical. Fault arm (`EXL3_TREE_PIPE_FAULT=5`): 5 faults, 243 rounds recomputed; ids and per-round records = the tree arm.
+- Broad lane on `pfast4` (`exl3-native-broad-c1-request-v5`): AIME 3/3, MMLU-Pro 8/10, I3 Logic 1/4, LCB 1/3 = 13/20 (= `pfast3`); model-call 162.49 tok/s; C1 179.3 / 76.9 / 32.4 tok/s; acceptance length 3.951.
+- GSM8K: 3 runs per image, not 5; host load in the E window 5.3-6.1 vs 2.7-3.7 in the I window.
+
+### Not kept
+
+| Attempt | Kind | Result |
+|---|---|---|
+| int8 MLP (`5113d` mlp_noedge, layers 4-59) + int8 Q·Kᵀ | numerics | R3 UNRESOLVED: C5 at 8K, 90 % interval −0.054 … +1.020; strict P1, P2 FAIL at 8K / 32K / 128K |
+| int8 MLP at 8K / 32K, int8 Q·Kᵀ at 128K+ (depth routing, law `int8_route`) | numerics | R3 UNRESOLVED (same C5 at 8K) |
+| Draft at 5 / 6 / 8 bpw (vs 4.00 bpw) | draft precision | tok/s −3.5 / −3.0 / −4.1 % at 1K, −7.0 / −5.1 / −5.2 % at 8K, −3.4 / −2.6 / −3.9 % at 32K: rounds +3.0-4.7 % slower (the fast m16 / GEMV routes need K = 4), tokens per round −3.8 … +0.4 % |
+| Row-split verify attention (`3014-attn-verify-rowsplit`) | exact | bit-identical on all 5,040 tree shapes; kernel ×0.78-0.86 speed; decode +0.5 / +1.0 / +2.6 % ms |
+| Reconstruct prefetch (`5114-prefill-recon-prefetch`) | exact | bit-identical; hides 4.5 % of reconstruct time; no measurable gain |
+| Commit maps + draft-ahead (9602 + 9603) on 9601 | exact | ids identical, faster than every reference window at 1K; at 8K candidate windows 26.056 / 25.812 / 26.130 vs reference 26.097 / 26.192 / 26.160 / 26.081: keep rule fails |
+
+R3 (pre-registered 2026-10-04, before any R3 run): R2's limits on 13 held-out documents (6 at 8K, 4 at 32K, 3 at 128K; CPython 3.14.7 sources and GNU manuals); paired, stratified block bootstrap (512 positions, 32 continuation tokens per block), 2,000 replicates, seed 20261004. A check passes iff the point margin ≥ 0 and the 5th-percentile margin ≥ 0; fails iff the point margin < 0; else UNRESOLVED. UNRESOLVED is not a pass. Shipped int8 Q·Kᵀ: R3 PASS (strict P: P2 at 8K UNRESOLVED); served route bit-identical to the gate image on 3 documents.
+
+## 11. Autoresearch: `pfast5` (350 W, 2026-10-06)
+
+Suite `bash autoresearch.sh`: build the checkout's `candidate-ext` image, then one guarded GPU window runs `bench/ar_gpu.py` inside the image (the served `Server`, driven in process, no HTTP; page table reset before every job, so every prompt is a cold prefill). `bench/ar_report.py` prints the metrics.
+
+| Part | Rows |
+|---|---|
+| Warm-up (untimed) | 1K × 32 tokens, 8K × 1 token |
+| Prefill (TTFT, 1 token) | 8,192 × 2, 32,768 (+1) × 2, 131,072 × 1 |
+| Decode (256 greedy tokens, no stop) | 1K, 8K, 32K, 32K, 8K, 1K (same prompt twice per depth; texts must be equal) |
+| Native | 262,000-token cold prefill, then 128 greedy tokens |
+
+- Prompts: the frozen C1 corpus, nonce line + corpus prefix + C1 instruction, served chat template, rendered length within +2 of the depth.
+- `prefill_tok_s` = geomean over 8K / 32K / 128K / 262K of prompt tokens / TTFT. `decode_tok_s` = geomean over 1K / 8K / 32K / 262K of decode tokens / decode-round time. Keep / discard: `speed_score` = √(prefill_tok_s × decode_tok_s).
+- Text checks: first token of each prefill row and the 4 decode texts vs `bench/ar_reference.json` (`fast_*`) and vs elpis `p3031b` (`bench/ar_lossless.json`, `lossless_*`; informational: greedy texts diverge after 7-28 tokens).
+- About 6-12 min of GPU per run; total 18-25 min with a cached build.
+- CPU-heavy work (nvcc, image builds) during a window corrupts it: run #3 (3022 under two parallel builds) measured 32K TTFT +10 % and was flagged.
+
+| Run | Stack | Prefill tok/s | Decode tok/s | TTFT 8K / 32K / 128K / 262K s | ms per round 1K / 8K / 32K / 262K | Texts |
+|---|---|---|---|---|---|---|
+| #2 | `pfast4` (= p2-integrate 478ed9f) | 1,197.2 | 120.1 | 5.55 / 22.08 / 117.27 / 312.41 | 25.75 / 26.38 / 28.93 / 48.28 | reference |
+| lossless | elpis `p3031b` (#78) | 997.4 | 82.7 | 5.82 / 24.58 / 149.90 / 434.25 | 26.70 / 27.27 / 29.40 / 112.94 | other text |
+| #4 | + `3022-prefill-pattn8i-pingpong` | 1,214.1 | 121.3 | 5.55 / 22.04 / 115.51 / 300.48 | 25.56 / 26.22 / 28.35 / 47.88 | 4/4 texts, 5/5 first tokens = #2 |
+| #6 `pfast5` | + `3032-attn-verify-int8qk-pv16` (`EXL3_AV_FAST` default 1) | **1,220.7** | **125.7** | 5.54 / 21.87 / 114.34 / **299.53** | 25.44 / 26.06 / 28.08 / **45.59** | 2/4 texts, 5/5 first tokens = #2 |
+
+### Kept
+
+| Patch | Change | Law | Evidence |
+|---|---|---|---|
+| `3022-prefill-pattn8i-pingpong` | int8 prefill attention (3021c): two K/V stages; tile `it` in stage `it & 1`; one `cp.async` wait + one barrier per tile, then the next tile's K and V load into the other stage during QK, softmax and PV; arithmetic and order unchanged. Shared memory 57,984 → 82,688 B, registers 240 → 254, no spills, 1 CTA per SM | `pattn8i_pipe` (every read sees its own tile; no load races a read); source link `pattn8i_pipe_diff.py` (the patch changes only schedule lines) | texts and first tokens identical; 262K TTFT −3.8 %, 128K −1.5 % |
+| `3032-attn-verify-int8qk-pv16` | decode verify split kernel (3-bit KV): `EXL3_AV_FAST` 0 = exact kernel, 1 = int8 Q·Kᵀ (default), 2 = fp16-accumulated P·V, 3 = both; read once per process before graph capture. Mode 1: Q per (row, 32-dim group) to int8 (amax / 127), K bytes = 2c − 7 from the 3-bit planes (exact), one m16n8k32 IMMA per group, exact int → fp32, scale in the score epilogue; the softmax and P·V are unchanged | `attn_fast` (K bytes exact, k-slot bijection, exact group dot product, scores row-local: row invariance kept); source link `attn_fast_diff.py` | `DecGate` D1 PASS; broad lane 14/20 (AIME 3/3); ms per round −4.8 % at 262K |
+
+`pfast5` = `pfast4` + 3022 + 3032. `bend PROOF.bend`: ALL PROOFS CHECK (50 law modules, 52 proof modules); `--verdict` of `pattn8i_pipe_proof` and `attn_fast_proof`: ALL PROOFS CHECK.
+
+3032 modes, same suite, separate runs (ms per round 1K / 8K / 32K / 262K):
+
+| `EXL3_AV_FAST` | ms per round | Run |
+|---|---|---|
+| 0 (exact) | 25.56 / 26.22 / 28.35 / 47.88 | #4 (3022 image; mode 0 compiles to the same SASS as the kernel before 3032) |
+| 1 (int8 Q·Kᵀ) | 25.44 / 26.06 / 28.08 / 45.59 | #6 |
+| 2 (fp16-acc P·V) | 25.82 / 26.41 / 29.26 / 46.31 | window disturbed by host load (single 32K repeats at 38.7 ms median); indicative only |
+| 3 (both) | 25.57 / 26.09 / 27.81 / 43.90 | #5 |
+
+### Decode quality gate `DecGate` (rule D1, pre-registered 2026-10-06 before any GPU data)
+
+- Per document: cold prefill on the served generator; reference arm decodes a fixed 512-token greedy continuation C; every arm then teacher-forces [last prompt token] + C[:511] through 64 verify rounds of exactly 8 rows (the served verify call, chain descriptor, committed as accepted) and stores per-position logits.
+- Documents (held out; disjoint from the C1 corpus): R3's p8k-argparse, p8k-grep, p32k-sed, p32k-pydecimal, p128k-gawk, and bash.info + coreutils.info cut to 261,600 tokens.
+- Arms: `ref` and `base_rep` (exact kernel), floors `floor_tri` (Triton verify attention) and `floor_split` (split count S / 2), candidates `qk8`, `pv16`, `both`.
+- Limits as R3 (C1 continuation KL ≤ 1.25 × max floor, C3 top-1 ≥ min floor − 0.005, C4 |ΔNLL| ≤ max floor |ΔNLL| + 0.05, C5 p99 KL ≤ 1.25 × max floor; P4 acceptance band); paired block bootstrap, blocks of 32 positions, 2,000 replicates, seed 20261004.
+
+| Arm | 8K | 32K | 128K | 262K | P4 acceptance (band ≥ 3.398) | Verdict |
+|---|---|---|---|---|---|---|
+| `qk8` (shipped) | PASS | PASS | PASS | PASS | 3.507 | **PASS** |
+| `pv16` | UNRESOLVED (C3) | UNRESOLVED (C3) | UNRESOLVED (C5) | UNRESOLVED (C5) | 3.556 | UNRESOLVED |
+| `both` | PASS | UNRESOLVED (C5) | UNRESOLVED (C1, C3, C5) | PASS | 3.507 | UNRESOLVED |
+
+- Mean KL vs the exact kernel, 8K / 32K / 128K / 262K: `qk8` 1.21 / 1.35 / 1.31 / 1.42 × 10⁻³; floors 1.05-1.11 / 1.28-1.37 / 1.16 / 1.42-1.53 × 10⁻³.
+- Strict P1-P3 (not decisive): FAIL or UNRESOLVED at some depths for every arm.
+- Evidence: `/tmp/kernel-work/DecGate/out-d2`, rule sha256 `363ba300…`.
+
+### Not kept
+
+| Attempt | Kind | Result |
+|---|---|---|
+| 3032 modes 2 and 3 (fp16-accumulated P·V) | numerics | `DecGate` UNRESOLVED; mode 3 is the fastest at 262K (43.90 ms) |
+| int8 MLP linears (5113d defaults) on `pfast5` | numerics | prefill 1,449.7 tok/s (TTFT 4.49 / 17.88 / 97.83 / 265.57 s); already R3 UNRESOLVED (§10); not a candidate |
