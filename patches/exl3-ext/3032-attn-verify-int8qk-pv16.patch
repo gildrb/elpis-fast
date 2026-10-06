@@ -1,0 +1,372 @@
+--- a/exllamav3_ext/attn_verify.cu
++++ b/exllamav3_ext/attn_verify.cu
+@@ -12,6 +12,7 @@
+ 
+ constexpr int QSTR = AV_HD + 8;   // Q smem row stride (halves): conflict-free ldmatrix
+ constexpr int PSTR = AV_T + 8;    // P smem row stride (halves)
++constexpr int QS8 = AV_HD + 16;   // QK8 (ext 3032): int8 Q smem row stride (bytes): conflict-free ldmatrix
+ 
+ template <int BITS> struct Geo
+ {
+@@ -108,6 +109,50 @@
+         : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b0), "r"(b1));
+ }
+ 
++// Ext 3032 PV16: fp16-accumulate MMA, D (2 x half2) += A B
++__device__ __forceinline__ void mma16816_h(uint32_t* d, const uint32_t* a, uint32_t b0, uint32_t b1)
++{
++    asm volatile(
++        "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%0,%1}, {%2,%3,%4,%5}, {%6,%7}, {%0,%1};\n"
++        : "+r"(d[0]), "+r"(d[1])
++        : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b0), "r"(b1));
++}
++
++// Ext 3032 QK8: s8 x s8 -> s32 MMA (m16n8k32). A (16x32, row): a0 = (gid, k 4t..4t+3), a1 = (gid+8, ..),
++// a2 = (gid, k 16+4t..), a3 = (gid+8, k 16+4t..); B (32x8, col): b0 = (k 4t..4t+3, n gid), b1 = (k 16+4t.., n gid);
++// byte i of a register is k + i. C as mma16816
++__device__ __forceinline__ void imma16832(int* c, const uint32_t* a, uint32_t b0, uint32_t b1)
++{
++    asm volatile(
++        "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
++        : "+r"(c[0]), "+r"(c[1]), "+r"(c[2]), "+r"(c[3])
++        : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b0), "r"(b1));
++}
++
++// QK8 k-slot order of a 32-dim group: k-slot 16 h + 4 a + i holds dim 16 h + a + 4 i (h < 2, a < 4, i < 4), so lane t's
++// B bytes are the dims t, t + 4, t + 8, t + 12 (+ 16 h), one shift per 3-bit plane word. qk8_slot(dim) is its inverse
++__device__ __forceinline__ int qk8_slot(int d)
++{
++    return (d & 16) | ((d & 3) << 2) | ((d >> 2) & 3);
++}
++
++// The s8 K operand of lane t, half h of one 3-bit group (words w2h = 2-bit plane word h, w1 = 1-bit plane word):
++// byte i = 2 c - 7 for the code c = 2 x2 + x1 of dim 16 h + t + 4 i, exactly (u = 2 c in 0..14; + 0x79 per byte has no
++// carry, ^ 0x80 maps 2 c + 121 to the signed byte 2 c - 7)
++__device__ __forceinline__ uint32_t k3_s8(uint32_t w2h, uint32_t w1, int h, int t)
++{
++    uint32_t x2s = (w2h >> (2 * t)) << 2;
++    uint32_t y = __byte_perm(w1 >> (16 * h + t), 0u, 0x4140);
++    uint32_t u = (x2s & 0x0C0C0C0Cu) | (((y << 1) | (y << 5)) & 0x02020202u);
++    return (u + 0x79797979u) ^ 0x80808080u;
++}
++
++// Exact int -> float for |x| < 2^22 (pattn8i_kernel.cuh i2f_exact)
++__device__ __forceinline__ float i2f_exact(int x)
++{
++    return __fsub_rn(__int_as_float(x + 0x4B400000), 12582912.0f);
++}
++
+ __device__ __forceinline__ void ldsm_x4(uint32_t* r, const void* p)
+ {
+     uint32_t a = (uint32_t) __cvta_generic_to_shared(p);
+@@ -166,10 +211,14 @@
+     }
+ }
+ 
+-// TREE (ext 3012, attn_verify.cuh): tree is the TreeDesc (nullptr and unread when !TREE)
+-template <int KB, int VB, bool TREE>
++// TREE (ext 3012, attn_verify.cuh): tree is the TreeDesc (nullptr and unread when !TREE). FAST (ext 3032, AVF_* bits,
++// attn_verify.cuh): QK8 = int8 QK^T, PV16 = fp16-accumulated PV spans; 0 is the exact kernel
++template <int KB, int VB, bool TREE, int FAST = 0>
+ __device__ __forceinline__ void split_body(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree)
+ {
++    constexpr bool QK8 = (FAST & AVF_QK8) != 0;
++    constexpr bool PV16 = (FAST & AVF_PV16) != 0;
++    static_assert(!QK8 || KB == 3, "QK8: the s8 K operand is built from the 3-bit planes");
+     extern __shared__ __align__(16) unsigned char smem[];
+     half* qs = (half*) smem;                                  // [48][QSTR] H32-rotated q
+     half* ps = qs + AV_ROWS * QSTR;                           // [48][PSTR] fp16 p
+@@ -178,6 +227,11 @@
+     uint32_t* stages = (uint32_t*) (red_sum + AV_NW * AV_ROWS);
+     constexpr int STAGE_WORDS = AV_T * (Geo<KB>::ROWW + Geo<VB>::ROWW);
+     uint32_t* tstash = stages + AV_STAGES * STAGE_WORDS;     // TREE: [8][ROWW_K] K, then [8][ROWW_V] V
++    // QK8: the q region holds [48][QS8] int8 q (row r, group g: bytes 32 g + qk8_slot(dim)), then [8][48] fp32 scales
++    // (group g, row r): q[r][32 g + d] ~ qsc8[g][r] * 8 * q8[r][32 g + d]
++    unsigned char* qs8 = smem;
++    float* qsc8 = (float*) (smem + AV_ROWS * QS8);
++    static_assert(AV_ROWS * QS8 + 8 * AV_ROWS * 4 <= AV_ROWS * QSTR * 2, "QK8 q operands fit the fp16 q region");
+ 
+     const int kvh = blockIdx.y;
+     const int b = blockIdx.z;
+@@ -293,6 +347,45 @@
+                     for (int kh = 0; kh < 2; ++kh)
+                         a[ks][hr + 2 * kh] = valid ? *reinterpret_cast<const uint32_t*>(qr + 16 * ks + 8 * kh + 2 * t) : 0u;
+             }
++            if constexpr (QK8)
++            {
++                // QK8: the fp32 rotation (not rounded to fp16) quantised per (row, group): the 32 dims of a row's group
++                // are this thread's 8 and the 3 other t lanes' (shfl xor 1, 2), scale amax / 127, |q8| <= 127. The
++                // scale and codes are functions of the row's own q group alone
++                float c[4][4];
++                #pragma unroll
++                for (int nt = 0; nt < 4; ++nt)
++                {
++                    #pragma unroll
++                    for (int e = 0; e < 4; ++e) c[nt][e] = 0.f;
++                    mma16816(c[nt], a[0], hb[nt][0][0], hb[nt][0][1]);
++                    mma16816(c[nt], a[1], hb[nt][1][0], hb[nt][1][1]);
++                }
++                #pragma unroll
++                for (int hr = 0; hr < 2; ++hr)
++                {
++                    float amax = 0.f;
++                    #pragma unroll
++                    for (int nt = 0; nt < 4; ++nt) amax = fmaxf(amax, fmaxf(fabsf(c[nt][2 * hr]), fabsf(c[nt][2 * hr + 1])));
++                    amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, 1));
++                    amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, 2));
++                    const float inv = amax > 0.f ? __fdiv_rn(127.f, amax) : 0.f;
++                    const int r = 16 * mt + 8 * hr + gid;
++                    unsigned char* qrow = qs8 + r * QS8 + 32 * g;
++                    #pragma unroll
++                    for (int nt = 0; nt < 4; ++nt)
++                        #pragma unroll
++                        for (int e = 0; e < 2; ++e)
++                        {
++                            int q8 = max(-127, min(127, __float2int_rn(__fmul_rn(c[nt][2 * hr + e], inv))));
++                            qrow[qk8_slot(8 * nt + 2 * t + e)] = (unsigned char) (q8 & 255);
++                        }
++                    // K values are (2 c - 7) * s / 8: the 1 / 8 is folded into the q scale (exact)
++                    if (t == 0) qsc8[g * AV_ROWS + r] = __fmul_rn(__fdiv_rn(amax, 127.f), 0.125f);
++                }
++            }
++            else
++            {
+             #pragma unroll
+             for (int nt = 0; nt < 4; ++nt)
+             {
+@@ -303,6 +396,7 @@
+                 *reinterpret_cast<uint32_t*>(qs + (16 * mt + gid) * QSTR + col) = pack_h2(c[0], c[1]);
+                 *reinterpret_cast<uint32_t*>(qs + (16 * mt + 8 + gid) * QSTR + col) = pack_h2(c[2], c[3]);
+             }
++            }
+         }
+     }
+ 
+@@ -394,6 +488,42 @@
+         for (int i = 0; i < 3; ++i)
+             #pragma unroll
+             for (int c = 0; c < 4; ++c) sc[i][c] = 0.f;
++        if constexpr (QK8)
++        {
++            // QK8 (ext 3032): per group g one m16n8k32 IMMA per m-tile of the int8 q rows against the exact K codes
++            // 2 c - 7 (k3_s8), int32 accumulation (|J| <= 32 * 127 * 7 < 2^22, exact and order-free), then, in group
++            // order 0..7, sc += float(J) * (qsc8[g][row] * s[tok][g]): each score is a function of its row's q and its
++            // token's K alone
++            const uint32_t* kt = sk + (warp * 8 + gid) * Geo<KB>::ROWW;
++            const uint4 kq0 = *reinterpret_cast<const uint4*>(sk + (warp * 8 + 2 * t) * Geo<KB>::ROWW + Geo<KB>::WPT);
++            const uint4 kq1 = *reinterpret_cast<const uint4*>(sk + (warp * 8 + 2 * t + 1) * Geo<KB>::ROWW + Geo<KB>::WPT);
++            const half* ks0 = reinterpret_cast<const half*>(&kq0);
++            const half* ks1 = reinterpret_cast<const half*>(&kq1);
++            #pragma unroll
++            for (int g = 0; g < 8; ++g)
++            {
++                const uint32_t* gw = kt + g * KB;
++                uint32_t b0 = k3_s8(gw[0], gw[2], 0, t);
++                uint32_t b1 = k3_s8(gw[1], gw[2], 1, t);
++                float s0 = __half2float(ks0[g]);
++                float s1 = __half2float(ks1[g]);
++                #pragma unroll
++                for (int i = 0; i < 3; ++i)
++                {
++                    uint32_t a[4];
++                    ldsm_x4(a, qs8 + (16 * i + (lane & 15)) * QS8 + 32 * g + 16 * (lane >> 4));
++                    int ci[4] = {0, 0, 0, 0};
++                    imma16832(ci, a, b0, b1);
++                    float qa = qsc8[g * AV_ROWS + 16 * i + gid];
++                    float qb = qsc8[g * AV_ROWS + 16 * i + 8 + gid];
++                    sc[i][0] = fmaf(i2f_exact(ci[0]), __fmul_rn(qa, s0), sc[i][0]);
++                    sc[i][1] = fmaf(i2f_exact(ci[1]), __fmul_rn(qa, s1), sc[i][1]);
++                    sc[i][2] = fmaf(i2f_exact(ci[2]), __fmul_rn(qb, s0), sc[i][2]);
++                    sc[i][3] = fmaf(i2f_exact(ci[3]), __fmul_rn(qb, s1), sc[i][3]);
++                }
++            }
++        }
++        else
+         {
+             const uint32_t* kt = sk + (warp * 8 + gid) * Geo<KB>::ROWW;
+             const half* ksc = reinterpret_cast<const half*>(kt + Geo<KB>::WPT);
+@@ -486,7 +616,17 @@
+                 acc[i][j][3] *= alpha[2 * i + 1];
+             }
+ 
+-        // O += P V: this warp owns dims [32 warp, 32 warp + 32) = scale group `warp`
++        // O += P V: this warp owns dims [32 warp, 32 warp + 32) = scale group `warp`. PV16 (ext 3032, the dec16 kernel):
++        // the tile's 64-key span accumulates in fp16 per (m-tile, n-tile), flushed once into the fp32 acc after the
++        // tile (acc was already rescaled by alpha above). MMA rows are independent, so a row's span depends on its own
++        // p and the tile's V alone; a row whose p are all 0 for the tile gets a zero span, and acc + 0 equals acc (as the
++        // fp32-accumulate MMA's acc + 0 * v does), so all-masked tiles leave the row's state unchanged
++        uint32_t hacc[3][4][2];
++        if constexpr (PV16)
++            #pragma unroll
++            for (int i = 0; i < 3; ++i)
++                #pragma unroll
++                for (int j = 0; j < 4; ++j) hacc[i][j][0] = hacc[i][j][1] = 0u;
+         #pragma unroll
+         for (int kk = 0; kk < AV_T / 16; ++kk)
+         {
+@@ -510,9 +650,26 @@
+                 uint32_t b0 = pack_h2(vv[0][j], vv[1][j]);
+                 uint32_t b1 = pack_h2(vv[2][j], vv[3][j]);
+                 #pragma unroll
+-                for (int i = 0; i < 3; ++i) mma16816(acc[i][j], pa[i], b0, b1);
++                for (int i = 0; i < 3; ++i)
++                {
++                    if constexpr (PV16) mma16816_h(hacc[i][j], pa[i], b0, b1);
++                    else mma16816(acc[i][j], pa[i], b0, b1);
++                }
+             }
+         }
++        if constexpr (PV16)
++            #pragma unroll
++            for (int i = 0; i < 3; ++i)
++                #pragma unroll
++                for (int j = 0; j < 4; ++j)
++                {
++                    float2 f0 = __half22float2(*reinterpret_cast<half2*>(&hacc[i][j][0]));
++                    float2 f1 = __half22float2(*reinterpret_cast<half2*>(&hacc[i][j][1]));
++                    acc[i][j][0] += f0.x;
++                    acc[i][j][1] += f0.y;
++                    acc[i][j][2] += f1.x;
++                    acc[i][j][3] += f1.y;
++                }
+         }   // pass
+     }
+     cp_wait<0>();
+@@ -565,6 +722,25 @@
+                            tree);
+ }
+ 
++// Ext 3032: the 3-bit kernels with the EXL3_AV_FAST numerics (attn_verify.cuh): _f1 = QK8, _f2 = PV16, _f3 = both
++#define AV_FAST_SPLIT(F) \
++extern "C" __global__ void __launch_bounds__(AV_NW * 32, 1) attn_verify_split_k3v3_f##F(AV_SPLIT_ARGS) \
++{ \
++    split_body<3, 3, false, F>(q, k_cache, v_cache, k_scales, v_scales, h32, block_table, cache_seqlens, \
++                               partial_o, partial_ml, num_pages_per_seq, q_len, n_q_heads, n_kv_heads, scale_log2, \
++                               nullptr); \
++} \
++extern "C" __global__ void __launch_bounds__(AV_NW * 32, 1) attn_verify_split_k3v3_tree_f##F(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree) \
++{ \
++    split_body<3, 3, true, F>(q, k_cache, v_cache, k_scales, v_scales, h32, block_table, cache_seqlens, \
++                              partial_o, partial_ml, num_pages_per_seq, q_len, n_q_heads, n_kv_heads, scale_log2, \
++                              tree); \
++}
++AV_FAST_SPLIT(1)
++AV_FAST_SPLIT(2)
++AV_FAST_SPLIT(3)
++#undef AV_FAST_SPLIT
++
+ // Combine: one CTA per (row, kv head, batch), thread = output dim. The live partial slots are merged
+ // in slot order 0 .. live - 1 with the exact log-sum-exp weights; slots holding no position the row
+ // sees (m = -inf: every tile of the slot past the row's absolute position) are skipped, so the
+--- a/exllamav3_ext/attn_verify.cuh
++++ b/exllamav3_ext/attn_verify.cuh
+@@ -29,6 +29,19 @@
+ // holding r's path; the other passes are all-masked tiles, which leave (m, l, acc) bit-identical
+ // (bend/attn_tree_laws.bend: pass_once, path_prefix, sees_path). CHAIN (parent r - 1) is one
+ // identity pass, the cs12 arithmetic.
++//
++// FAST (ext 3032, attn_verify_split_k3v3[_tree]_f1/_f2/_f3; EXL3_AV_FAST, attn_verify_gr.cu): the 3-bit kernels with
++// two numerics changes, each a function of one row's own operands, so the tiles, passes, slots and row invariance
++// above are unchanged (the same schedule, the same masks; bend/attn_fast_laws.bend):
++// - QK8 (AVF_QK8): Q K^T on the s8 tensor path. The prologue quantises each row's fp32 H32-rotated q per 32-dim
++//   group to int8 (scale amax / 127, from that (row, group) alone); K enters as its exact 3-bit codes 2 c - 7 (in the
++//   H32 basis K is (2 c - 7) s / 8); one m16n8k32 IMMA per (group, m-tile) gives the exact integer group dot, scaled
++//   by (q scale * K scale) and summed over the groups in order 0..7 in fp32.
++// - PV16 (AVF_PV16): each tile's 64-key P V span accumulates in fp16 per MMA tile and is added once to the fp32 acc
++//   (an all-masked tile adds a zero span: (m, l) bit-identical, acc equal in value).
++// The exact kernel (3006 / 3012 arithmetic) is mode 0, the kill switch.
++#define AVF_QK8 1
++#define AVF_PV16 2
+ 
+ #include <cuda_runtime.h>
+ #include <cuda_fp16.h>
+@@ -123,6 +136,13 @@
+ // patch (block table 6, cache_seqlens 7, block-table width 10) keep their indices; q_len must be 8
+ extern "C" __global__ void attn_verify_split_k3v3_tree(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree);
+ extern "C" __global__ void attn_verify_split_k4v4_tree(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree);
++// FAST (ext 3032): the 3-bit kernels with AVF bits F (1 QK8, 2 PV16, 3 both), arguments as above
++extern "C" __global__ void attn_verify_split_k3v3_f1(AV_SPLIT_ARGS);
++extern "C" __global__ void attn_verify_split_k3v3_f2(AV_SPLIT_ARGS);
++extern "C" __global__ void attn_verify_split_k3v3_f3(AV_SPLIT_ARGS);
++extern "C" __global__ void attn_verify_split_k3v3_tree_f1(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree);
++extern "C" __global__ void attn_verify_split_k3v3_tree_f2(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree);
++extern "C" __global__ void attn_verify_split_k3v3_tree_f3(AV_SPLIT_ARGS, const uint8_t* __restrict__ tree);
+ extern "C" __global__ void attn_verify_combine(AV_COMBINE_ARGS);
+ extern "C" __global__ void attn_verify_combine_gate(AV_COMBINE_ARGS, const half* __restrict__ gate);
+ #endif
+--- a/exllamav3_ext/attn_verify_gr.cu
++++ b/exllamav3_ext/attn_verify_gr.cu
+@@ -4,17 +4,40 @@
+ #include <ATen/cuda/CUDAContext.h>
+ #include "util.h"
+ #include "util.cuh"
++#include <cstdlib>
+ 
+ int attn_verify_bits(const at::Tensor& cache, int n_kv_heads)
+ {
+     return (int) (cache.size(-1) / (n_kv_heads * (AV_HD / 32)));
+ }
+ 
++// Ext 3032: EXL3_AV_FAST selects the 3-bit split kernels' numerics (attn_verify.cuh FAST): 0 = the exact kernel
++// (kill switch), 1 = int8 QK^T only (default; unset or empty; DecGate D1 PASS), 2 = fp16-accumulated PV only, 3 = both. Read and
++// checked once per process at the first slot build (attn_verify_prepare, before any graph capture), so every slot
++// and every captured graph runs one mode; any other value is an error. The 4-bit kernels have no fast variant
++int attn_verify_fast_mode()
++{
++    static const int mode = [] {
++        const char* env = std::getenv("EXL3_AV_FAST");
++        if (!env || !env[0]) return 1;
++        TORCH_CHECK(env[0] >= '0' && env[0] <= '3' && !env[1], "EXL3_AV_FAST must be 0, 1, 2 or 3, got '", env, "'");
++        return env[0] - '0';
++    }();
++    return mode;
++}
++
+ static void* split_fn(int bits, bool tree)
+ {
+     TORCH_CHECK(bits == 3 || bits == 4, "attn_verify: no split kernel for this bitrate");
+-    if (tree) return bits == 3 ? (void*) attn_verify_split_k3v3_tree : (void*) attn_verify_split_k4v4_tree;
+-    return bits == 3 ? (void*) attn_verify_split_k3v3 : (void*) attn_verify_split_k4v4;
++    if (bits == 4) return tree ? (void*) attn_verify_split_k4v4_tree : (void*) attn_verify_split_k4v4;
++    static void* const k3[2][4] =
++    {
++        {(void*) attn_verify_split_k3v3, (void*) attn_verify_split_k3v3_f1,
++         (void*) attn_verify_split_k3v3_f2, (void*) attn_verify_split_k3v3_f3},
++        {(void*) attn_verify_split_k3v3_tree, (void*) attn_verify_split_k3v3_tree_f1,
++         (void*) attn_verify_split_k3v3_tree_f2, (void*) attn_verify_split_k3v3_tree_f3},
++    };
++    return k3[tree ? 1 : 0][attn_verify_fast_mode()];
+ }
+ 
+ static int split_smem(int bits, bool tree)
+--- a/exllamav3_ext/attn_verify_gr.cuh
++++ b/exllamav3_ext/attn_verify_gr.cuh
+@@ -8,6 +8,10 @@
+ // Bits per value of a quantized paged cache tensor (..., n_kv_heads * 256 / 32 * bits)
+ int attn_verify_bits(const at::Tensor& cache, int n_kv_heads);
+ 
++// Ext 3032: the EXL3_AV_FAST mode of the 3-bit split kernels (0 exact, 1 int8 QK^T, 2 fp16-accumulated PV, 3 both),
++// parsed strictly once per process (attn_verify_gr.cu)
++int attn_verify_fast_mode();
++
+ // Validates the shape and sets the split kernel's dynamic shared memory limit (once per slot);
+ // tree selects the TREE split kernel (ext 3012)
+ void attn_verify_prepare(int bits, bool tree);
+--- a/exllamav3_ext/bindings.cpp
++++ b/exllamav3_ext/bindings.cpp
+@@ -49,6 +49,7 @@
+ #include "kv_compact.cuh"
+ #include "tree_pipe.cuh"
+ #include "pattn.cuh"
++#include "attn_verify_gr.cuh"
+ 
+ #include "histogram.cuh"
+ 
+@@ -275,6 +276,7 @@
+     m.def("pattn_int8_qk_enabled", &pattn_int8_qk_enabled, "pattn_int8_qk_enabled");
+     m.def("pattn_stage_int8k", &pattn_stage_int8k, "pattn_stage_int8k");
+     m.def("pattn_prefill_int8", &pattn_prefill_int8, "pattn_prefill_int8");
++    m.def("attn_verify_fast_mode", &attn_verify_fast_mode, "attn_verify_fast_mode");
+ 
+     m.def("count_inf_nan", &count_inf_nan, "count_inf_nan");
+     m.def("histogram", &histogram, "histogram");

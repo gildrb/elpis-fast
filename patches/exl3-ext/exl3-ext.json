@@ -16,7 +16,7 @@
     "path": "/opt/venv/lib/python3.13/site-packages/exllamav3_ext.cpython-313-x86_64-linux-gnu.so",
     "base_record": "/opt/elpis-base-manifest.json"
   },
-  "series_sha256": "5e12194cafe83f2a00c191bd4d5f2fbfd53730e428543e5e5029c4530a1f4f2a",
+  "series_sha256": "3c0934134e3d9096d895d15eed0d904722b5dd89415ea9503b72a0f13a90c789",
   "patches": [
     {
       "name": "0001-gdn-shared-carveout.patch",
@@ -209,6 +209,10 @@
     {
       "name": "3022-prefill-pattn8i-pingpong.patch",
       "sha256": "2ed53e703d414b57eca9628952b07492ef9af1b3488d2874efcc70929a7db114"
+    },
+    {
+      "name": "3032-attn-verify-int8qk-pv16.patch",
+      "sha256": "551b1096dd822c082e0769cb520b4795aca421a2d338153ffb6820ea9eccb56d"
     }
   ],
   "files": {
@@ -238,23 +242,23 @@
     },
     "exllamav3_ext/attn_verify.cu": {
       "pre": null,
-      "post": "b5f9f81d22138e5241e3199fbb06d8933fa432a89f3b00177f91f980bec078d2"
+      "post": "af9574546e39f2ab4870ec45a284d28dd0ef04b55a740a099337b61743818bd4"
     },
     "exllamav3_ext/attn_verify.cuh": {
       "pre": null,
-      "post": "3ef7d60c35ee8084c3441143fb59e4db13dcaac8f26fa03b4536b44e375c21d5"
+      "post": "38a747e0a3dec3d620d4a222ad23aa2307f3a1a44ba49325fac1264a6acf7ddf"
     },
     "exllamav3_ext/attn_verify_gr.cu": {
       "pre": null,
-      "post": "0831bc99ac2a3ff26d91c025cb4a79e53a980355c035a1df0e32162a763eeaf5"
+      "post": "840186905b22c343a13a78fedea44b06df1c816d295c7590711ccc371975ec8b"
     },
     "exllamav3_ext/attn_verify_gr.cuh": {
       "pre": null,
-      "post": "acd47a8f2de484aab15710aff8d13f590d6013d1f383b4ae8867bc646c458782"
+      "post": "d1953bfc8b5d7e0d2dba2a32b1e65134a03a23f400a7c9fd17ca2ad64005a80a"
     },
     "exllamav3_ext/bindings.cpp": {
       "pre": "381d867b845335b15106f86aa79e284c9d6b7d316703dd555d8a86a13ed2b465",
-      "post": "6028d5b0f57f7636fbbfcf1c3da7d25e92fecfc38376ef344404a24b744d513d"
+      "post": "f02fa3d464454fe329ac2cec8b03df303d900a2710eebd29bb5b209619faf156"
     },
     "exllamav3_ext/dflash2.cu": {
       "pre": "dd5023eea10408948da25b68e4d6242628704886c261c1c63bd5213887298250",

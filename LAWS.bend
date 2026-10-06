@@ -223,6 +223,14 @@ import ./bend/prefill_nosync_laws.bend as PrefillNosyncLaws
 # 75.6, no integer kq equals it) and the partial bound is 512064, not the per-group design's 32 * 127 * 7 = 28448; the rounding
 # points of a score are Q rotation, Q quantisation, K requantisation, rs, skk, rs * sk and the final multiply, the integer core none.
 import ./bend/pattn8i_int_laws.bend as Pattn8iIntLaws
+# ext 3032 int8 QK^T operands of the verify split kernel (EXL3_AV_FAST bit 1; exllamav3_ext/attn_verify.cu; bend/attn_fast.bend
+# against bend/attn_fast_spec.bend and pattn8i_int.bend's IMMA / i2f_exact): every 3-bit code's s8 K byte is 2 c - 7 with no byte
+# carry; the Q k-slot order and the K operand's dim of each k-slot are inverse bijections of 0..31 (one head dim per k-slot);
+# one group IMMA is the exact integer group dot product, |J| <= 32 * 127 * 7 = 28448 < 2^22, on which i2f_exact is exact; the
+# int8 q bytes and q scales of a row decode back to that row (inside the fp16 q region they replace) and the q absmax reads
+# exactly the four lanes of its fragment row. Each score is thus a function of its row's q and its token's K; the tile / pass /
+# slot schedule (attn_stride_laws.bend, attn_tree_laws.bend) is unchanged by 3032.
+import ./bend/attn_fast_laws.bend as AttnFastLaws
 # ext 9601 tree pipe (bend/tree_pipe.bend, reference bend/tree_pipe_spec.bend): the verify consumes the
 # device-staged TreeDesc, positions and embedded rows, and the host checks the record and the consumed inputs
 # after the launch. For every consumed input (faults included) the round emits exactly the sequential round's

@@ -51,5 +51,6 @@ import ./bend/prefill_membound_proof.bend as PrefillMemboundProof
 import ./bend/qc_staging_proof.bend as QcStagingProof
 import ./bend/prefill_nosync_proof.bend as PrefillNosyncProof
 import ./bend/pattn8i_int_proof.bend as Pattn8iIntProof
+import ./bend/attn_fast_proof.bend as AttnFastProof
 import ./bend/tree_pipe_proof.bend as TreePipeProof
 import ./bend/pattn8i_pipe_proof.bend as Pattn8iPipeProof
