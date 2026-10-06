@@ -834,3 +834,8 @@ Suite `bash autoresearch.sh`: build the checkout's `candidate-ext` image, then o
 |---|---|---|
 | 3032 modes 2 and 3 (fp16-accumulated P·V) | numerics | `DecGate` UNRESOLVED; mode 3 is the fastest at 262K (43.90 ms) |
 | int8 MLP linears (5113d defaults) on `pfast5` | numerics | prefill 1,449.7 tok/s (TTFT 4.49 / 17.88 / 97.83 / 265.57 s); already R3 UNRESOLVED (§10); not a candidate |
+| W8A8 attention + GDN prefill linears, MLP fp16 (`5115`, layers 4-59) | numerics | prefill 1,300-1,311 tok/s (TTFT 5.06-5.12 / 20.2-20.4 / 106.8-108.3 / 284.0-285.9 s); R3 (tag r3, 13 documents) **FAIL**: C2 prompt KL at 8K / 32K / 128K, C5 at 8K / 32K / 128K, C3 at 32K; the harness's 32K decode rows also showed a first decode round of ~2.2 s (GPU-side, timing-dependent, not reproduced by probes) |
+| W8A8 GDN linears only (`5115`, `EXL3_INT8_ATTN=0`) | numerics | prefill 1,280 tok/s, no stall; R3 **FAIL**: C2 at 8K and 128K; C1, C2, C5 unresolved at 32K |
+| Checkpoint settle keeps the pinned copies (`9504`) | exact | 4/4 texts; 32K first decode round 48 → 28 ms; suite flat (391.9 vs 391.75) |
+
+R3 tag r3 (2026-10-06): calibration arm int8 Q·Kᵀ (= `pfast5` prefill) PASS (strict P unresolved); `pfast5` image vs gate image identity on 3 documents: bit-identical. Gate fix for r3: `run_job` constructs `Job` + `ArgmaxSampler` (the served `Server` no longer exposes `job_type` / `sampler_type`). Evidence: `/tmp/kernel-work/Int8Gate/verdict3-r3.txt`.
