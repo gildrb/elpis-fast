@@ -1,6 +1,6 @@
 # elpis-fast
 
-**The fastest decode and the fastest prefill for Qwen3.8-27B on one RTX 3090 that keep the model's quality.**
+**The fastest decode and prefill for 4-bit Qwen3.8-27B on one RTX 3090 that preserve the model's quality, proven with Bend**
 
 - Model: Qwen3.8-27B, EXL3 4.00 bpw weights, 3-bit KV cache.
 - Context: 262,144 tokens (native).
