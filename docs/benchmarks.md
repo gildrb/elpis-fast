@@ -841,3 +841,36 @@ Suite `bash autoresearch.sh`: build the checkout's `candidate-ext` image, then o
 | 8192-row prefill merge (`9506-prefill-m8192`, staging ≤ 640 pages; GDN delta rule sliced to 2048 rows for exactness) | exact | 4/4 texts; TTFT 5.56 / 21.95 / 113.04 / 299.35 s: flat (128K −1.1 %); law `prefill_m8192` proven |
 
 R3 tag r3 (2026-10-06): calibration arm int8 Q·Kᵀ (= `pfast5` prefill) PASS (strict P unresolved); `pfast5` image vs gate image identity on 3 documents: bit-identical. Gate fix for r3: `run_job` constructs `Job` + `ArgmaxSampler` (the served `Server` no longer exposes `job_type` / `sampler_type`). Evidence: `/tmp/kernel-work/Int8Gate/verdict3-r3.txt`.
+
+## 12. Long agent sessions (2026-10-10)
+
+Failures seen on the live endpoint (OMP and Hermes logs, 72 h):
+
+| Cause | Effect |
+|---|---|
+| Tool call fails the server's argument check → HTTP 502 after the full generation | Greedy decoding gives the same output on retry. OMP retried 11 × (86K prompt, ~31 s each). |
+| `stream=true` sent buffered SSE | No byte until the turn ends. Clients time out (OMP 600 s, Hermes 900 s) and retry. |
+| No cancel on disconnect | The dropped job ran to the end; the retry waited behind it. ~8,000 `ConnectionResetError` tracebacks. |
+
+Server changes (`serve/exl3_server.py`):
+
+- Real streaming: role chunk at once, reasoning and content as generated, `: keep-alive` every 10 s while idle, chunked transfer (HTTP/1.1).
+- Client disconnect, a stalled reader (60 s write deadline) or the 7,200 s limit cancel the engine job (`Generator.cancel`). Queued jobs of gone clients do not start.
+- Model output never gives 502. A bad argument value goes to the client as the raw string. Bad tool markup goes to the client as plain `content`; the log gets one reason code.
+- `usage.prompt_tokens_details.cached_tokens`.
+- Idle keep-alive resets close without a traceback.
+
+Soak (image `serve-fix1`, `sha256:35957772…`, serve window, 350 W): one scripted agent session, 3 tools, `stream=true`, effort medium, `max_tokens` 4096; each turn adds a ~10K-token tool result.
+
+| Check | Result |
+|---|---|
+| Turns | 44, all HTTP 200, 0 empty, 0 invalid tool arguments, 0 exact repeats |
+| Context | 654 → 200,497 prompt tokens |
+| First byte | 0.02-0.38 s |
+| First token, prefix hit | 1.3-24 s (grows with the new tokens per turn) |
+| Recall of 3 facts planted at turn 1 | 12/12 at 18K, 65K, 133K, 192K |
+| Disconnect after first byte (8,192-token request) | next request done in 26.7 s |
+
+Limit found: one 270K-token cache for all clients. A request with another prefix (other tools, other system prompt) at 133K-192K evicts the session's pages. The next session turn then re-prefills: 197 s at 193K (turn 41). Separate clients on one endpoint each pay this cost when they alternate.
+
+Evidence: `/tmp/kernel-work/AR/soak/runs/fix1.metrics{,.json,.window}`.

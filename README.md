@@ -227,7 +227,9 @@ Every source link, its engine tree and its inputs: [docs/development.md](docs/de
 
 ```
 - Greedy only. One sequence at a time.
-- Chat stream=true sends buffered SSE. The first event is not the first token.
+- One 270K-token prefix cache for all clients. A request with another prefix can evict a long
+  session; its next turn re-prefills (197 s at 193K). See docs/benchmarks.md §12.
+- Chat stream=true streams reasoning and content as generated; tool calls arrive at the end of the turn.
 - Prefill and decode verify attention compute Q·Kᵀ in int8. Outputs can differ from fp16.
   EXL3_AV_FAST=0 restores the exact decode attention kernel.
 - Exact logit ties can depend on max_tokens (cs12: token 39457 at 8192 vs 54185 at 256,

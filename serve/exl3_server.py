@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Gil Rodrigues
-"""Native EXL3/DFlash2 HTTP adapter. SSE buffers a whole response, not tokens."""
+"""Native EXL3/DFlash2 HTTP adapter. Chat SSE streams text as it is generated."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import queue
 import re
 import select
 import signal
+import socket
 import stat
 import sys
 import threading
@@ -28,7 +29,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, ClassVar, Protocol, override
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, override
 
 import regex
 import torch
@@ -56,7 +57,6 @@ else:
     PERSIST_INSTALLED = True
 
 if TYPE_CHECKING:
-    import socket
     from collections.abc import Buffer, Generator, Iterable, Iterator
     from types import TracebackType
 
@@ -128,9 +128,21 @@ FORMAT_CHECKER = FormatChecker()
 PATTERN_SECONDS = 2.0
 PATTERN_DEADLINE: ContextVar[float] = ContextVar("pattern_deadline")
 # Client read limits: request line and headers (this includes keep-alive idle time),
-# then the whole body. Generation and response writes have no socket timeout.
+# then the whole body. A streaming response write that cannot finish within
+# WRITE_SECONDS (a client that stopped reading) ends the stream and cancels its job;
+# other response writes have no socket timeout.
 HEADER_SECONDS = 60
 BODY_SECONDS = 300
+WRITE_SECONDS = 60.0
+# A request waits at most this long for its job; a waiting request checks once per
+# poll interval whether its client is gone, and a stream that has written nothing
+# for a heartbeat interval sends an SSE comment.
+GENERATION_SECONDS = 7200
+CLIENT_POLL_SECONDS = 1.0
+HEARTBEAT_SECONDS = 10.0
+THINK_OPEN = "<think>"
+THINK_CLOSE = "</think>"
+TOOL_OPEN = "<tool_call>"
 # Persistent prefix cache (engine generator/persist.py). Saved on SIGTERM and after
 # 30 s idle, at most every 5 min.
 PERSIST_ENV = "QWEN_PREFIX_PERSIST"
@@ -646,7 +658,7 @@ def check_unevaluated_patterns(schema: dict[str, JSON]) -> None:
 
 @dataclass
 class Tool:
-    """A declared function and the validator governing its returned arguments."""
+    """A declared function and the validator that decodes its returned arguments."""
 
     name: str
     wire: dict[str, JSON]
@@ -657,10 +669,11 @@ class Tool:
         """Decode one parameter using its schema and the template's raw strings.
 
         Returns:
-            A schema-compatible JSON value, preferring valid raw strings.
+            A schema-compatible JSON value, preferring valid raw strings, else the
+            raw string itself: what the model wrote is returned for the client to
+            validate, never rejected as a server error.
 
         Raises:
-            APIError: Generated JSON is malformed or violates its schema.
             InvariantTypeError: Validated schema state is internally inconsistent.
 
         """
@@ -689,21 +702,9 @@ class Tool:
             return literal[0]
         try:
             value = load_json(raw)
-        except (ValueError, RecursionError) as exc:
-            msg = f"Model emitted invalid JSON for {self.name}.{name}"
-            raise APIError(
-                msg,
-                502,
-                "invalid_tool_arguments",
-            ) from exc
-        if not validator.is_valid(value):
-            msg = f"Model argument violates schema: {self.name}.{name}"
-            raise APIError(
-                msg,
-                502,
-                "invalid_tool_arguments",
-            )
-        return value
+        except (ValueError, RecursionError):
+            return raw
+        return value if validator.is_valid(value) else raw
 
 
 def parse_tools(value: JSON) -> dict[str, Tool]:
@@ -740,8 +741,8 @@ def parse_tools(value: JSON) -> dict[str, Tool]:
         if "description" in function:
             string_value(function["description"], "tool.function.description")
         if "strict" in function:
-            # Strictness is a response postcondition, not constrained decoding:
-            # every returned call is schema-valid, or the request fails with 502.
+            # Strictness is not enforced: generation is not constrained, and model
+            # arguments are returned as written even when they violate the schema.
             boolean_value(function["strict"], "tool.function.strict")
         schema = object_value(
             function.get(
@@ -1267,6 +1268,18 @@ def strip_parameter_newlines(raw: str) -> str:
     return raw
 
 
+class ToolOutputError(Exception):
+    """Model tool markup that cannot be returned as tool calls.
+
+    Never an HTTP error: the response carries the model's text as plain content.
+    """
+
+    def __init__(self, reason: str) -> None:
+        """Keep a fixed reason code; model text never enters the error or the log."""
+        super().__init__(reason)
+        self.reason = reason
+
+
 @dataclass
 class ToolMarkup:
     """A cursor over the tool-call section of one model response."""
@@ -1284,13 +1297,13 @@ class ToolMarkup:
         """Advance past optional whitespace and one required token.
 
         Raises:
-            APIError: The token is absent.
+            ToolOutputError: The token is absent.
 
         """
         self.skip_space()
         if not self.content.startswith(token, self.cursor):
-            msg = "Model emitted incomplete or malformed tool markup"
-            raise APIError(msg, 502, "invalid_tool_call")
+            reason = "malformed_markup"
+            raise ToolOutputError(reason)
         self.cursor += len(token)
 
     def tag_name(self, prefix: str) -> str:
@@ -1300,14 +1313,14 @@ class ToolMarkup:
             The text between the prefix and the closing bracket.
 
         Raises:
-            APIError: The tag is not closed.
+            ToolOutputError: The tag is not closed.
 
         """
         self.consume(prefix)
         end = self.content.find(">", self.cursor)
         if end < 0:
-            msg = "Model emitted an incomplete tool tag"
-            raise APIError(msg, 502, "invalid_tool_call")
+            reason = "incomplete_tag"
+            raise ToolOutputError(reason)
         name = self.content[self.cursor : end]
         self.cursor = end + 1
         return name
@@ -1316,21 +1329,22 @@ class ToolMarkup:
         """Decode one `<parameter=...>` element into the arguments.
 
         Raises:
-            APIError: The parameter is malformed, duplicated, or invalid.
+            ToolOutputError: The parameter markup is malformed or duplicated.
+            APIError: The client's schema cannot be evaluated.
 
         """
         key = self.tag_name("<parameter=")
         if not key or any(char in key for char in "<>\r\n") or key in arguments:
-            msg = "Model emitted invalid or duplicate parameter names"
-            raise APIError(msg, 502, "invalid_tool_arguments")
+            reason = "invalid_parameter_name"
+            raise ToolOutputError(reason)
         end = self.content.find("</parameter>", self.cursor)
         if end < 0:
-            msg = "Model emitted an incomplete parameter"
-            raise APIError(msg, 502, "invalid_tool_arguments")
+            reason = "incomplete_parameter"
+            raise ToolOutputError(reason)
         raw = self.content[self.cursor : end]
         if MARKUP.search(raw):
-            msg = "Model emitted ambiguous nested tool markup"
-            raise APIError(msg, 502, "invalid_tool_arguments")
+            reason = "nested_markup"
+            raise ToolOutputError(reason)
         raw = strip_parameter_newlines(raw)
         try:
             arguments[key] = self.chat.tools[name].parameter(key, raw)
@@ -1340,23 +1354,27 @@ class ToolMarkup:
         self.cursor = end + len("</parameter>")
 
     def call(self) -> dict[str, JSON]:
-        """Decode and validate one complete `<tool_call>` element.
+        """Decode one complete `<tool_call>` element.
+
+        Arguments are returned as the model wrote them, even when they violate
+        the function's schema; the client validates them.
 
         Returns:
             The OpenAI function call.
 
         Raises:
-            APIError: The call is malformed, undeclared, or violates its schema.
+            ToolOutputError: The call is malformed, undeclared, or not the named one.
+            APIError: The client's schema cannot be evaluated.
 
         """
-        self.consume("<tool_call>")
+        self.consume(TOOL_OPEN)
         name = self.tag_name("<function=")
         if name not in self.chat.tools:
-            msg = "Model called an undeclared function"
-            raise APIError(msg, 502, "invalid_tool_call")
+            reason = "undeclared_function"
+            raise ToolOutputError(reason)
         if self.chat.choice.startswith("named:") and name != self.chat.choice[6:]:
-            msg = "Model did not satisfy named tool_choice"
-            raise APIError(msg, 502, "tool_choice_not_satisfied")
+            reason = "named_choice_not_satisfied"
+            raise ToolOutputError(reason)
         arguments: dict[str, JSON] = {}
         while True:
             self.skip_space()
@@ -1365,14 +1383,13 @@ class ToolMarkup:
             self.parameter(name, arguments)
         self.consume("</function>")
         self.consume("</tool_call>")
+        # The whole-object check runs only to surface an unevaluable client schema
+        # (HTTP 400); its verdict on the model's arguments is the client's to act on.
         try:
-            valid = self.chat.tools[name].validator.is_valid(arguments)
+            self.chat.tools[name].validator.is_valid(arguments)
         except (Unresolvable, RecursionError) as exc:
             msg = "Tool schema reference cannot be evaluated"
             raise APIError(msg, 400, "invalid_schema") from exc
-        if not valid:
-            msg = f"Model arguments violate the schema for {name}"
-            raise APIError(msg, 502, "invalid_tool_arguments")
         return {
             "id": "call_" + uuid.uuid4().hex,
             "type": "function",
@@ -1387,57 +1404,243 @@ def check_no_tool_call(content: str, chat: Chat) -> None:
     """Check a response without `<tool_call>` against markup and tool_choice.
 
     Raises:
-        APIError: Stray markup is present or a tool call was required.
+        ToolOutputError: Stray markup is present or a tool call was required.
 
     """
     if MARKUP.search(content):
-        msg = "Model emitted malformed tool markup"
-        raise APIError(msg, 502, "invalid_tool_call")
+        reason = "stray_markup"
+        raise ToolOutputError(reason)
     if chat.choice == "required" or chat.choice.startswith("named:"):
-        msg = "Model did not satisfy required tool_choice"
-        raise APIError(msg, 502, "tool_choice_not_satisfied")
+        reason = "required_choice_not_satisfied"
+        raise ToolOutputError(reason)
 
 
-def parse_tool_output(
-    content: str, chat: Chat, finish: str
-) -> tuple[str, list[dict[str, JSON]]]:
-    """Decode complete Qwen calls, withholding all calls on a length-ended turn.
+def decode_tool_calls(content: str, chat: Chat) -> tuple[str, list[dict[str, JSON]]]:
+    """Decode the complete Qwen calls that end a stop-ended turn.
 
     Returns:
-        Preserved leading content and validated OpenAI function calls.
+        The content before the first call and the OpenAI function calls.
 
     Raises:
-        APIError: Model markup, arguments, or tool-choice postconditions fail.
+        ToolOutputError: Model markup or tool-choice postconditions fail.
 
     """
-    # A budget-ended response may include one complete call followed by a partial
-    # second call. Dispatch neither: the entire model turn must be complete.
-    if finish == "length":
-        return content, []
-    start = content.find("<tool_call>")
+    start = content.find(TOOL_OPEN)
     if start < 0:
         check_no_tool_call(content, chat)
         return content, []
     if chat.choice == "none":
-        msg = "Model emitted a tool call while tool_choice=none"
-        raise APIError(msg, 502, "tool_choice_not_satisfied")
+        reason = "call_with_choice_none"
+        raise ToolOutputError(reason)
     if MARKUP.search(content[:start]):
-        msg = "Model emitted malformed markup before a tool call"
-        raise APIError(msg, 502, "invalid_tool_call")
+        reason = "markup_before_call"
+        raise ToolOutputError(reason)
     calls: list[dict[str, JSON]] = []
     markup = ToolMarkup(content, chat, start)
     while markup.cursor < len(content):
         calls.append(markup.call())
         markup.skip_space()
         if markup.cursor < len(content) and not content.startswith(
-            "<tool_call>", markup.cursor
+            TOOL_OPEN, markup.cursor
         ):
-            msg = "Model emitted text after a tool call"
-            raise APIError(msg, 502, "invalid_tool_call")
+            reason = "text_after_call"
+            raise ToolOutputError(reason)
     if not chat.parallel and len(calls) > 1:
-        msg = "Model violated parallel_tool_calls=false"
-        raise APIError(msg, 502, "tool_choice_not_satisfied")
+        reason = "parallel_calls_disabled"
+        raise ToolOutputError(reason)
     return content[:start], calls
+
+
+def parse_tool_output(
+    content: str, chat: Chat, finish: str
+) -> tuple[str, list[dict[str, JSON]]]:
+    """Decode complete Qwen calls, or return the whole content as plain text.
+
+    What the model wrote is never an HTTP error. Markup that cannot be returned
+    as calls, or an unmet tool policy, yields the content with no calls and one
+    log line naming only the reason.
+
+    Returns:
+        Preserved leading content and the OpenAI function calls.
+
+    """
+    # A budget-ended response may include one complete call followed by a partial
+    # second call. Dispatch neither: the entire model turn must be complete.
+    if finish == "length":
+        return content, []
+    try:
+        return decode_tool_calls(content, chat)
+    except ToolOutputError as exc:
+        log_line(f"[tool] unparsed: {exc.reason}")
+        return content, []
+
+
+def parse_response(
+    text: str, chat: Chat, finish: str
+) -> tuple[str | None, str, list[dict[str, JSON]], str]:
+    """Split reasoning, decode tool calls and settle the finish reason.
+
+    Returns:
+        Reasoning (None when the turn has none), content, calls and finish reason.
+
+    """
+    reasoning, content = split_reasoning(text, thinking=chat.thinking)
+    with pattern_budget():
+        content, calls = parse_tool_output(content, chat, finish)
+    return reasoning, content, calls, "tool_calls" if calls else finish
+
+
+def held_suffix(text: str, tag: str) -> int:
+    """Measure the end of the text that could begin the tag.
+
+    Returns:
+        The length of the longest suffix of text that is a proper tag prefix.
+
+    """
+    for size in range(min(len(text), len(tag) - 1), 0, -1):
+        if text.endswith(tag[:size]):
+            return size
+    return 0
+
+
+def streamed_rest(final: str, streamed: str) -> str:
+    """Return the part of a final channel that has not been streamed.
+
+    Returns:
+        The final text after its streamed prefix.
+
+    Raises:
+        RuntimeError: Streamed text is not a prefix of the final parse.
+
+    """
+    if not final.startswith(streamed):
+        msg = "Streamed text is not a prefix of the parsed response"
+        raise RuntimeError(msg)
+    return final[len(streamed) :]
+
+
+@dataclass
+class ChatStream:
+    """Split model text into reasoning and content deltas as it arrives.
+
+    Streams only text the complete parse (`parse_response`) also returns: a tail
+    that could begin `<think>`, `</think>` or `<tool_call>` waits for more text,
+    and nothing from the first `<tool_call>` on streams. `finish` parses the whole
+    completion, checks that each streamed channel is a prefix of the parse and
+    returns the rest with the tool calls.
+
+    Phases: `start` until the text does or cannot begin with `<think>`; then
+    `reasoning` (thinking on, or `<think>` seen) until `</think>`, else `content`;
+    `content` until `<tool_call>`; `tools` buffers the rest.
+    """
+
+    thinking: bool
+    phase: Literal["start", "reasoning", "content", "tools"] = "start"
+    pending: str = ""
+    # Parts joined only at `finish`: repeated string appends would be quadratic.
+    received: list[str] = field(default_factory=list)
+    reasoning: list[str] = field(default_factory=list)
+    content: list[str] = field(default_factory=list)
+    # Leading newlines after `<think>`, and newlines or spaces after `</think>`,
+    # belong to neither channel.
+    strip_reasoning: bool = False
+    strip_content: bool = False
+
+    def feed(self, delta: str) -> list[dict[str, JSON]]:
+        """Take the next generated text.
+
+        Returns:
+            The reasoning and content deltas that are safe to send now.
+
+        """
+        self.received.append(delta)
+        out: list[dict[str, JSON]] = []
+        if self.phase == "tools":
+            return out
+        self.pending += delta
+        if self.phase == "start":
+            if self.pending.startswith(THINK_OPEN):
+                self.pending = self.pending[len(THINK_OPEN) :]
+                self.phase = "reasoning"
+                self.strip_reasoning = True
+            elif THINK_OPEN.startswith(self.pending):
+                return out
+            else:
+                self.phase = "reasoning" if self.thinking else "content"
+        if self.phase == "reasoning":
+            self.feed_reasoning(out)
+        if self.phase == "content":
+            self.feed_content(out)
+        return out
+
+    def feed_reasoning(self, out: list[dict[str, JSON]]) -> None:
+        """Send reasoning up to `</think>` or a tail that could begin it."""
+        if self.strip_reasoning:
+            self.pending = self.pending.lstrip("\n")
+            if not self.pending:
+                return
+            self.strip_reasoning = False
+        end = self.pending.find(THINK_CLOSE)
+        cut = len(self.pending) - held_suffix(self.pending, THINK_CLOSE)
+        piece = self.pending[: end if end >= 0 else cut]
+        if piece:
+            self.reasoning.append(piece)
+            out.append({"reasoning_content": piece})
+        if end < 0:
+            self.pending = self.pending[cut:]
+            return
+        self.pending = self.pending[end + len(THINK_CLOSE) :]
+        self.phase = "content"
+        self.strip_content = True
+
+    def feed_content(self, out: list[dict[str, JSON]]) -> None:
+        """Send content up to `<tool_call>` or a tail that could begin it."""
+        if self.strip_content:
+            self.pending = self.pending.lstrip("\n ")
+            if not self.pending:
+                return
+            self.strip_content = False
+        start = self.pending.find(TOOL_OPEN)
+        cut = len(self.pending) - held_suffix(self.pending, TOOL_OPEN)
+        piece = self.pending[: start if start >= 0 else cut]
+        if piece:
+            self.content.append(piece)
+            out.append({"content": piece})
+        if start < 0:
+            self.pending = self.pending[cut:]
+            return
+        self.pending = ""
+        self.phase = "tools"
+
+    def finish(
+        self, text: str, chat: Chat, finish: str
+    ) -> tuple[list[dict[str, JSON]], str]:
+        """Parse the complete text and return what has not been streamed.
+
+        Returns:
+            The remaining reasoning and content deltas, one delta per tool call,
+            and the finish reason.
+
+        Raises:
+            RuntimeError: The streamed deltas differ from the complete text.
+
+        """
+        if text != "".join(self.received):
+            msg = "Streamed native text differs from the full completion"
+            raise RuntimeError(msg)
+        reasoning, content, calls, reason = parse_response(text, chat, finish)
+        out: list[dict[str, JSON]] = []
+        rest = streamed_rest(reasoning or "", "".join(self.reasoning))
+        if rest:
+            out.append({"reasoning_content": rest})
+        rest = streamed_rest(content, "".join(self.content))
+        if rest:
+            out.append({"content": rest})
+        out.extend(
+            {"tool_calls": [{"index": index, **call}]}
+            for index, call in enumerate(calls)
+        )
+        return out, reason
 
 
 def speculative_counts(
@@ -1481,6 +1684,7 @@ class Result:
 
     text: str
     prompt_tokens: int
+    cached_tokens: int
     completion_tokens: int
     finish_reason: str
     spec_rounds: int
@@ -1490,14 +1694,16 @@ class Result:
         """Expose native token counts without inferring counts from decoded text.
 
         Returns:
-            OpenAI-compatible prompt, completion, and total token counts, plus the
-            request's speculative verify rounds and the tokens they committed.
+            OpenAI-compatible prompt (with its prefix-cache hits), completion, and
+            total token counts, plus the request's speculative verify rounds and
+            the tokens they committed.
 
         """
         return {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.prompt_tokens + self.completion_tokens,
+            "prompt_tokens_details": {"cached_tokens": self.cached_tokens},
             "exl3_spec": {
                 "rounds": self.spec_rounds,
                 "committed": self.spec_committed,
@@ -1505,20 +1711,76 @@ class Result:
         }
 
 
+# Why a request abandoned its job, for the worker's cancellation log line.
+CLIENT_GONE = "client disconnected"
+TIMED_OUT = "generation timed out"
+RESPONSE_FAILED = "response failed"
+
+
 @dataclass
 class Pending:
-    """One FIFO generation request and its cross-thread completion state."""
+    """One FIFO generation request and its cross-thread completion state.
+
+    A streaming request also gets a channel: the worker puts the job's text
+    deltas in generation order, then None once the outcome is set.
+    """
 
     input_ids: torch.Tensor
     options: Options
     identifier: str = field(default_factory=lambda: uuid.uuid4().hex)
     event: threading.Event = field(default_factory=threading.Event)
+    channel: queue.SimpleQueue[str | None] | None = None
+    # Set by the request thread once nobody waits for the job any more.
+    cancel: threading.Event = field(default_factory=threading.Event)
+    cancel_reason: str = CLIENT_GONE
     result: Result | None = None
     error: Exception | None = None
+
+    def abandon(self, reason: str) -> None:
+        """Ask the worker to skip or cancel the job, recording why once."""
+        if not self.cancel.is_set():
+            self.cancel_reason = reason
+            self.cancel.set()
+
+    def complete(self) -> None:
+        """Publish the result or error the worker has set."""
+        self.event.set()
+        if self.channel is not None:
+            self.channel.put(None)
 
 
 class ShutdownError(Exception):
     """The job was cancelled, or never started, because the server is stopping."""
+
+
+class ClientGoneError(Exception):
+    """The job was skipped or cancelled because its request stopped waiting."""
+
+
+def job_outcome(pending: Pending) -> Result:
+    """Translate a completed job into its result or an HTTP-safe error.
+
+    Returns:
+        Complete decoded text and native token accounting.
+
+    Raises:
+        ClientGoneError: The request abandoned the job.
+        APIError: The server is stopping or the native worker failed.
+        RuntimeError: The worker signalled completion without a result.
+
+    """
+    if isinstance(pending.error, ClientGoneError):
+        raise ClientGoneError from pending.error
+    if isinstance(pending.error, ShutdownError):
+        msg = "Server is shutting down"
+        raise APIError(msg, 503, "server_shutting_down")
+    if pending.error is not None:
+        msg = "Native generation failed; inspect server logs"
+        raise APIError(msg, 503, "generation_failed") from pending.error
+    if pending.result is None:
+        msg = "Native worker completed without a result"
+        raise RuntimeError(msg)
+    return pending.result
 
 
 def log_line(line: object) -> None:
@@ -1745,6 +2007,31 @@ def call_untyped(function: object) -> object:
     return function()
 
 
+def take_event(
+    pending: Pending, event: dict[object, object]
+) -> dict[str, object] | None:
+    """Forward the text of one of the job's native events to its stream channel.
+
+    Each `text` is new text; in order the deltas form `full_completion`.
+
+    Returns:
+        The event with its string keys if it ends the job, else None.
+
+    Raises:
+        InvariantTypeError: A text delta is not a string.
+
+    """
+    if pending.channel is not None and "text" in event:
+        text = event["text"]
+        if not isinstance(text, str):
+            msg = "Native text delta is not a string"
+            raise InvariantTypeError(msg)
+        pending.channel.put(text)
+    if not event.get("eos"):
+        return None
+    return {key: value for key, value in event.items() if isinstance(key, str)}
+
+
 class Server:
     """Own the fixed native EXL3/DFlash2 stack and its single generation worker."""
 
@@ -1919,40 +2206,25 @@ class Server:
         self.check_context(ids)
         return ids
 
-    def submit(self, ids: torch.Tensor, options: Options) -> Result:
-        """Enqueue exactly one native job and wait for its terminal result.
+    def enqueue(self, ids: torch.Tensor, options: Options) -> Pending:
+        """Queue exactly one native job; streaming jobs get a delta channel.
 
         Returns:
-            Complete decoded text and native token accounting.
+            The queued job, which the worker completes.
 
         Raises:
-            APIError: Generation times out or the native worker fails.
-            RuntimeError: The worker signals completion without a result.
+            APIError: The context budget is exceeded or the server is stopping.
 
         """
         self.check_context(ids, options.max_tokens)
         if self.stopping.is_set():
             msg = "Server is shutting down"
             raise APIError(msg, 503, "server_shutting_down")
-        pending = Pending(ids, options)
+        pending = Pending(
+            ids, options, channel=queue.SimpleQueue() if options.stream else None
+        )
         self.queue.put(pending)
-        if not pending.event.wait(timeout=7200):
-            msg = "Generation timed out after 7200 seconds"
-            raise APIError(msg, 504, "generation_timeout")
-        if isinstance(pending.error, ShutdownError):
-            msg = "Server is shutting down"
-            raise APIError(msg, 503, "server_shutting_down")
-        if pending.error is not None:
-            msg = "Native generation failed; inspect server logs"
-            raise APIError(
-                msg,
-                503,
-                "generation_failed",
-            ) from pending.error
-        if pending.result is None:
-            msg = "Native worker completed without a result"
-            raise RuntimeError(msg)
-        return pending.result
+        return pending
 
     def open_prefix_cache(self, args: argparse.Namespace) -> PrefixStore | None:
         """Open and restore the persistent prefix cache, or run without it.
@@ -2073,11 +2345,13 @@ class Server:
                 return
             if late is not None:
                 late.error = ShutdownError()
-                late.event.set()
+                late.complete()
             self.queue.task_done()
 
     def _next_pending(self) -> Pending | None:
         """Wait for the next job, running idle saves meanwhile.
+
+        Jobs abandoned while queued are skipped.
 
         Returns:
             The next job to run, or None once stopping.
@@ -2089,15 +2363,19 @@ class Server:
             except queue.Empty:
                 self._save(final=False)
                 continue
-            if pending is not None and not self.stopping.is_set():
-                return pending
-            if pending is not None:
-                pending.error = ShutdownError()
-                pending.event.set()
-            self.queue.task_done()
             if pending is None:
+                self.queue.task_done()
                 self._fail_late_jobs()
                 return None
+            if self.stopping.is_set():
+                pending.error = ShutdownError()
+            elif pending.cancel.is_set():
+                log_line(f"[serve] request cancelled: {pending.cancel_reason}")
+                pending.error = ClientGoneError()
+            else:
+                return pending
+            pending.complete()
+            self.queue.task_done()
 
     def _step(self) -> list[dict[object, object]]:
         """Run one generator iteration.
@@ -2132,6 +2410,7 @@ class Server:
         Raises:
             RuntimeError: The generator needs a restart or ended without an event.
             ShutdownError: The server began stopping during the job.
+            ClientGoneError: The request abandoned the job.
 
         """
         if self.failure is not None:
@@ -2154,13 +2433,16 @@ class Server:
             if self.stopping.is_set():
                 self.gen.cancel(job)
                 raise ShutdownError
+            if pending.cancel.is_set():
+                self.gen.cancel(job)
+                log_line(f"[serve] request cancelled: {pending.cancel_reason}")
+                raise ClientGoneError
             for event in self._step():
-                if event.get("identifier") == pending.identifier and event.get("eos"):
-                    final = {
-                        key: value
-                        for key, value in event.items()
-                        if isinstance(key, str)
-                    }
+                if event.get("identifier") != pending.identifier:
+                    continue
+                terminal = take_event(pending, event)
+                if terminal is not None:
+                    final = terminal
         if final is None:
             msg = "Native generation ended without a terminal event"
             raise RuntimeError(msg)
@@ -2185,10 +2467,12 @@ class Server:
         # the full completion, and never re-decode a speculative token list.
         text = final.get("full_completion")
         prompt_tokens = final.get("prompt_tokens")
+        cached_tokens = final.get("cached_tokens")
         completion_tokens = final.get("new_tokens")
         if (
             not isinstance(text, str)
             or type(prompt_tokens) is not int
+            or type(cached_tokens) is not int
             or type(completion_tokens) is not int
         ):
             msg = "Native terminal event lacks complete text or usage"
@@ -2220,6 +2504,7 @@ class Server:
         return Result(
             text,
             prompt_tokens,
+            cached_tokens,
             completion_tokens,
             "length" if final.get("eos_reason") == "max_new_tokens" else "stop",
             spec_rounds,
@@ -2233,7 +2518,7 @@ class Server:
                 break
             try:
                 pending.result = self._run_job(pending)
-            except ShutdownError as exc:
+            except (ShutdownError, ClientGoneError) as exc:
                 pending.error = exc
             except Exception as exc:
                 # Last resort: record the failure and return it to the waiting request.
@@ -2243,7 +2528,7 @@ class Server:
                     "[serve] native worker failure: %s", type(exc).__name__
                 )
             finally:
-                pending.event.set()
+                pending.complete()
                 self.queue.task_done()
                 self.persist_dirty = True
                 self.last_job_end = time.monotonic()
@@ -2305,31 +2590,9 @@ CHAT_FIELDS = COMMON_FIELDS | {
 }
 
 
-def stream_deltas(
-    reasoning: str | None,
-    content: str,
-    calls: list[dict[str, JSON]],
-    finish: str,
-) -> list[tuple[dict[str, JSON], str | None]]:
-    """List the chat-completion chunk deltas of one buffered response.
-
-    Returns:
-        Each delta with its finish reason, in stream order.
-
-    """
-    deltas: list[tuple[dict[str, JSON], str | None]] = [
-        ({"role": "assistant", "content": ""}, None)
-    ]
-    if reasoning is not None:
-        deltas.append(({"reasoning_content": reasoning}, None))
-    if content:
-        deltas.append(({"content": content}, None))
-    deltas.extend(
-        ({"tool_calls": [{"index": index, **call}]}, None)
-        for index, call in enumerate(calls)
-    )
-    deltas.append(({}, finish))
-    return deltas
+SSE_DONE = b"data: [DONE]\n\n"
+SSE_HEARTBEAT = b": keep-alive\n\n"
+CHUNKED_END = b"0\r\n\r\n"
 
 
 def sse_frame(chunk: dict[str, JSON]) -> bytes:
@@ -2344,49 +2607,129 @@ def sse_frame(chunk: dict[str, JSON]) -> bytes:
     ).encode("utf-8")
 
 
-def sse_frames(
+def delta_frame(
     common: dict[str, JSON],
-    deltas: list[tuple[dict[str, JSON], str | None]],
-    usage: dict[str, JSON] | None,
-) -> list[bytes]:
-    """Encode a buffered chat-completion stream.
+    delta: dict[str, JSON],
+    reason: str | None,
+    *,
+    usage: bool,
+) -> bytes:
+    """Encode one chat-completion chunk.
 
     Args:
         common: Fields shared by every chunk.
-        deltas: Chunk deltas with their finish reasons.
-        usage: The usage object when the client asked for it, else None.
+        delta: The chunk delta.
+        reason: The finish reason of the last chunk, else None.
+        usage: Whether the client asked for usage (every chunk then has `usage`).
 
     Returns:
-        Every frame, ending with `[DONE]`.
+        The `data:` frame.
 
     """
-    frames: list[bytes] = []
-    for delta, reason in deltas:
-        chunk: dict[str, JSON] = {
-            **common,
-            "object": "chat.completion.chunk",
-            "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+    chunk: dict[str, JSON] = {
+        **common,
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+    }
+    if usage:
+        chunk["usage"] = None
+    return sse_frame(chunk)
+
+
+def usage_frame(common: dict[str, JSON], usage: dict[str, JSON]) -> bytes:
+    """Encode the choiceless usage chunk that precedes `[DONE]`.
+
+    Returns:
+        The `data:` frame.
+
+    """
+    return sse_frame({
+        **common,
+        "object": "chat.completion.chunk",
+        "choices": [],
+        "usage": usage,
+    })
+
+
+def error_payload(error: APIError) -> dict[str, JSON]:
+    """Shape an OpenAI error object without native exception details.
+
+    Returns:
+        The `{"error": ...}` object.
+
+    """
+    error_type = (
+        "authentication_error"
+        if error.status == HTTPStatus.UNAUTHORIZED
+        else "invalid_request_error"
+        if error.status < HTTPStatus.INTERNAL_SERVER_ERROR
+        else "server_error"
+    )
+    return {
+        "error": {
+            "message": str(error),
+            "type": error_type,
+            "param": None,
+            "code": error.code,
         }
-        if usage is not None:
-            chunk["usage"] = None
-        frames.append(sse_frame(chunk))
-    if usage is not None:
-        frames.append(
-            sse_frame({
-                **common,
-                "object": "chat.completion.chunk",
-                "choices": [],
-                "usage": usage,
-            })
-        )
-    frames.append(b"data: [DONE]\n\n")
-    return frames
+    }
+
+
+def chunked(data: bytes) -> bytes:
+    """Frame nonempty bytes as one HTTP/1.1 chunk (an empty chunk ends the body).
+
+    Returns:
+        The size line, the bytes and the chunk's CRLF.
+
+    Raises:
+        ValueError: The bytes are empty.
+
+    """
+    if not data:
+        msg = "An empty chunk would end the body"
+        raise ValueError(msg)
+    return f"{len(data):X}\r\n".encode("ascii") + data + b"\r\n"
+
+
+def drain_channel(
+    channel: queue.SimpleQueue[str | None], first: str | None
+) -> tuple[str, bool]:
+    """Join one received channel item with the deltas already queued behind it.
+
+    Returns:
+        The joined text, and whether the end marker was reached.
+
+    """
+    parts: list[str] = []
+    item = first
+    while item is not None:
+        parts.append(item)
+        try:
+            item = channel.get_nowait()
+        except queue.Empty:
+            return "".join(parts), False
+    return "".join(parts), True
+
+
+@contextmanager
+def write_deadline(sock: socket.socket) -> Generator[None]:
+    """Give each write on the socket WRITE_SECONDS, then restore blocking writes.
+
+    Yields:
+        Control while writes have the deadline.
+
+    """
+    sock.settimeout(WRITE_SECONDS)
+    try:
+        yield
+    finally:
+        sock.settimeout(None)
 
 
 class DeadlineReader(io.RawIOBase):
     """Read a blocking client socket only until the current read deadline.
 
-    The wait uses poll(), so the socket stays blocking and writes have no timeout.
+    The wait uses poll(), so reads need no socket timeout.
     """
 
     def __init__(self, sock: socket.socket) -> None:
@@ -2396,6 +2739,23 @@ class DeadlineReader(io.RawIOBase):
         self.poller = select.poll()
         self.poller.register(sock, select.POLLIN)
         self.deadline = 0.0
+
+    def peer_closed(self) -> bool:
+        """Check, without waiting or consuming bytes, whether the client has gone.
+
+        A readable socket with nothing to peek is at end of stream; peeked bytes
+        are a pipelined request, so the client is still there.
+
+        Returns:
+            Whether the client closed or reset the connection.
+
+        """
+        if not self.poller.poll(0):
+            return False
+        try:
+            return not self.sock.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return True
 
     @override
     def readable(self) -> bool:
@@ -2426,6 +2786,9 @@ class Handler(BaseHTTPRequestHandler):
     engine: ClassVar[Server]
     authorization: ClassVar[str]
     reader: DeadlineReader
+    # SSE transport state of the current streaming response.
+    sse_chunked: bool
+    sse_written: float
 
     @override
     def setup(self) -> None:
@@ -2439,7 +2802,12 @@ class Handler(BaseHTTPRequestHandler):
     def handle_one_request(self) -> None:
         # The request line and headers, including keep-alive idle time.
         self.reader.deadline = time.monotonic() + HEADER_SECONDS
-        super().handle_one_request()
+        try:
+            super().handle_one_request()
+        except (ConnectionError, TimeoutError):
+            # The client reset, closed or stalled the connection (typically while
+            # idle between keep-alive requests): close it without a traceback.
+            self.close_connection = True
 
     @override
     def log_message(self, format: str, *args: object) -> None:
@@ -2487,24 +2855,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_error_json(self, error: APIError) -> None:
         """Emit an OpenAI-shaped error without exposing native exception details."""
-        error_type = (
-            "authentication_error"
-            if error.status == HTTPStatus.UNAUTHORIZED
-            else "invalid_request_error"
-            if error.status < HTTPStatus.INTERNAL_SERVER_ERROR
-            else "server_error"
-        )
-        self.send_json(
-            error.status,
-            {
-                "error": {
-                    "message": str(error),
-                    "type": error_type,
-                    "param": None,
-                    "code": error.code,
-                }
-            },
-        )
+        self.send_json(error.status, error_payload(error))
 
     def body_length(self) -> int:
         """Validate unambiguous, bounded HTTP request framing.
@@ -2657,7 +3008,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.chat(body, render=self.path.endswith("/render"))
         except APIError as exc:
             self.send_error_json(exc)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ClientGoneError):
             self.close_connection = True
         except Exception as exc:
             # Last resort: an unexpected request failure becomes a 500 response.
@@ -2667,7 +3018,7 @@ class Handler(BaseHTTPRequestHandler):
             )
 
     def chat(self, body: dict[str, JSON], *, render: bool) -> None:
-        """Render or generate a chat response, including buffered tool-call SSE.
+        """Render or generate a chat response, streamed as SSE on request.
 
         Raises:
             APIError: Rendering was requested with streaming enabled.
@@ -2689,11 +3040,24 @@ class Handler(BaseHTTPRequestHandler):
         if render:
             self.send_json(200, {"token_ids": ids.flatten().tolist()})
             return
-        result = self.engine.submit(ids, options)
-        reasoning, content = split_reasoning(result.text, thinking=chat.thinking)
-        with pattern_budget():
-            content, calls = parse_tool_output(content, chat, result.finish_reason)
-        finish = "tool_calls" if calls else result.finish_reason
+        pending = self.engine.enqueue(ids, options)
+        common: dict[str, JSON] = {
+            "id": "chatcmpl-" + uuid.uuid4().hex[:24],
+            "created": int(time.time()),
+            "model": self.engine.model_name,
+        }
+        if options.stream:
+            # A stream write the client does not take within WRITE_SECONDS times
+            # out, which ends the stream and cancels the job like any write failure.
+            with write_deadline(self.reader.sock):
+                self.stream_chat(
+                    pending, chat, common, include_usage=options.include_usage
+                )
+            return
+        result = self.await_result(pending)
+        reasoning, content, calls, finish = parse_response(
+            result.text, chat, result.finish_reason
+        )
         message: dict[str, JSON] = {
             "role": "assistant",
             "content": content or (None if calls else ""),
@@ -2701,36 +3065,163 @@ class Handler(BaseHTTPRequestHandler):
         }
         if calls:
             message["tool_calls"] = list(calls)
-        common: dict[str, JSON] = {
-            "id": "chatcmpl-" + uuid.uuid4().hex[:24],
-            "created": int(time.time()),
-            "model": self.engine.model_name,
-        }
-        usage = result.usage()
-        if not options.stream:
-            self.send_json(
-                200,
-                {
-                    **common,
-                    "object": "chat.completion",
-                    "choices": [
-                        {"index": 0, "message": message, "finish_reason": finish}
-                    ],
-                    "usage": usage,
-                },
-            )
-            return
-        deltas = stream_deltas(reasoning, content, calls, finish)
-        frames = sse_frames(common, deltas, usage if options.include_usage else None)
+        self.send_json(
+            200,
+            {
+                **common,
+                "object": "chat.completion",
+                "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                "usage": result.usage(),
+            },
+        )
+
+    def await_result(self, pending: Pending) -> Result:
+        """Wait for a non-streaming job, cancelling it if its client goes away.
+
+        Returns:
+            The job's result.
+
+        Raises:
+            APIError: The job outlived the generation limit; it is cancelled.
+            ClientGoneError: The client closed its connection; the job is cancelled.
+
+        """
+        deadline = time.monotonic() + GENERATION_SECONDS
+        while not pending.event.wait(
+            min(CLIENT_POLL_SECONDS, max(0.0, deadline - time.monotonic()))
+        ):
+            if time.monotonic() >= deadline:
+                pending.abandon(TIMED_OUT)
+                msg = f"Generation timed out after {GENERATION_SECONDS} seconds"
+                raise APIError(msg, 504, "generation_timeout")
+            if self.reader.peer_closed():
+                pending.abandon(CLIENT_GONE)
+                raise ClientGoneError
+        return job_outcome(pending)
+
+    def send_sse(self, data: bytes) -> None:
+        """Write SSE bytes now, as one chunk when the body is chunked."""
+        self.wfile.write(chunked(data) if self.sse_chunked else data)
+        self.wfile.flush()
+        self.sse_written = time.monotonic()
+
+    def stream_chat(
+        self,
+        pending: Pending,
+        chat: Chat,
+        common: dict[str, JSON],
+        *,
+        include_usage: bool,
+    ) -> None:
+        """Send chat SSE while the job generates; a lost client cancels the job.
+
+        HTTP 200 is committed before generation, so a later failure is sent as an
+        SSE error event that ends the stream. An HTTP/1.1 request gets a chunked
+        body, an HTTP/1.0 request a close-delimited one.
+        """
+        self.sse_chunked = self.request_version == "HTTP/1.1"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Content-Length", str(sum(len(item) for item in frames)))
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-EXL3-Transport", "buffered-sse")
-        self.end_headers()
-        for item in frames:
-            self.wfile.write(item)
-        self.wfile.flush()
+        self.send_header("X-EXL3-Transport", "streaming")
+        if self.sse_chunked:
+            self.send_header("Transfer-Encoding", "chunked")
+        else:
+            self.send_header("Connection", "close")
+        error: APIError | None = None
+        try:
+            self.end_headers()
+            self.stream_events(pending, chat, common, include_usage=include_usage)
+        except (OSError, ClientGoneError):
+            pending.abandon(CLIENT_GONE)
+            self.close_connection = True
+            return
+        except APIError as exc:
+            error = exc
+        except Exception as exc:
+            # Last resort after the status is committed: end with an error event.
+            pending.abandon(RESPONSE_FAILED)
+            LOGGER.exception("[serve] stream failure: %s", type(exc).__name__)
+            error = APIError("Internal server error", 500, "internal_error")
+        try:
+            if error is not None:
+                self.close_connection = True
+                self.send_sse(sse_frame(error_payload(error)))
+            if self.sse_chunked:
+                self.wfile.write(CHUNKED_END)
+        except OSError:
+            self.close_connection = True
+
+    def stream_events(
+        self,
+        pending: Pending,
+        chat: Chat,
+        common: dict[str, JSON],
+        *,
+        include_usage: bool,
+    ) -> None:
+        """Send the role chunk, the job's deltas, its tool calls, finish and usage."""
+        role: dict[str, JSON] = {"role": "assistant", "content": ""}
+        self.send_sse(delta_frame(common, role, None, usage=include_usage))
+        result, stream = self.relay_stream(
+            pending, chat, common, include_usage=include_usage
+        )
+        deltas, reason = stream.finish(result.text, chat, result.finish_reason)
+        for delta in deltas:
+            self.send_sse(delta_frame(common, delta, None, usage=include_usage))
+        self.send_sse(delta_frame(common, {}, reason, usage=include_usage))
+        if include_usage:
+            self.send_sse(usage_frame(common, result.usage()))
+        self.send_sse(SSE_DONE)
+
+    def relay_stream(
+        self,
+        pending: Pending,
+        chat: Chat,
+        common: dict[str, JSON],
+        *,
+        include_usage: bool,
+    ) -> tuple[Result, ChatStream]:
+        """Send the job's safe deltas as they arrive, with heartbeats meanwhile.
+
+        Returns:
+            The job's result and the stream state that sent its deltas.
+
+        Raises:
+            InvariantTypeError: The job has no delta channel.
+            APIError: The job outlived the generation limit; it is cancelled.
+            ClientGoneError: The client closed its connection; the job is cancelled.
+
+        """
+        channel = pending.channel
+        if channel is None:
+            msg = "Streaming job has no delta channel"
+            raise InvariantTypeError(msg)
+        stream = ChatStream(thinking=chat.thinking)
+        deadline = time.monotonic() + GENERATION_SECONDS
+        next_poll = time.monotonic() + CLIENT_POLL_SECONDS
+        done = False
+        while not done:
+            now = time.monotonic()
+            if now >= deadline:
+                pending.abandon(TIMED_OUT)
+                msg = f"Generation timed out after {GENERATION_SECONDS} seconds"
+                raise APIError(msg, 504, "generation_timeout")
+            if now >= next_poll:
+                next_poll = now + CLIENT_POLL_SECONDS
+                if self.reader.peer_closed():
+                    pending.abandon(CLIENT_GONE)
+                    raise ClientGoneError
+                if now - self.sse_written >= HEARTBEAT_SECONDS:
+                    self.send_sse(SSE_HEARTBEAT)
+            try:
+                first = channel.get(timeout=min(next_poll, deadline) - now)
+            except queue.Empty:
+                continue
+            text, done = drain_channel(channel, first)
+            for delta in stream.feed(text):
+                self.send_sse(delta_frame(common, delta, None, usage=include_usage))
+        return job_outcome(pending), stream
 
     def completions(self, body: dict[str, JSON]) -> None:
         """Generate one raw text completion with native context and usage checks.
@@ -2769,7 +3260,7 @@ class Handler(BaseHTTPRequestHandler):
                     "token-ID list"
                 )
                 raise APIError(msg)
-        result = self.engine.submit(ids, options)
+        result = self.await_result(self.engine.enqueue(ids, options))
         self.send_json(
             200,
             {
@@ -2837,7 +3328,7 @@ def main() -> None:
     _ = signal.signal(signal.SIGTERM, on_sigterm)
     log_line(
         f"[serve] listening on http://{args.host}:{args.port}; "
-        "SSE transport is buffered"
+        "chat SSE streams as tokens arrive"
     )
     try:
         httpd.serve_forever()

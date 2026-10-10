@@ -169,10 +169,14 @@ function-call syntax. Responses expose OpenAI-style `tool_calls`, including JSON
 argument strings and call IDs; assistant-call and matching tool-result history
 can be submitted for continuation. Clients execute tools; the server does not
 execute their functions. Supported selection is `auto`, `none`, `required` or a
-named function, with `parallel_tool_calls` enforced on the result. JSON Schema
-validation is offline. `strict: true` is a fail-closed schema postcondition, not
-constrained generation: invalid model arguments or violated tool selection fail
-rather than being repaired or reported as successful calls. Tool `parameters` must be
+named function; `parallel_tool_calls` and the selection are stated in the prompt.
+JSON Schema validation is offline. Generation is not constrained, and what the model
+writes never fails the request: a parameter value that is not valid JSON or breaks
+its schema is returned as the raw string (the call is kept, also when the whole call
+breaks the schema; `strict: true` is accepted but not enforced), and markup that
+cannot be parsed, an undeclared function, text after a call or an unmet
+`tool_choice` / `parallel_tool_calls` returns the decoded text as plain `content`
+without `tool_calls` (logged as `[tool] unparsed: <reason>`). Tool `parameters` must be
 a direct `type: object` with parameter schemas in its root `properties`,
 `patternProperties` or `additionalProperties`. Root `allOf`, `anyOf`, `oneOf`, `not`,
 `if`/`then`/`else` and `dependentSchemas` are accepted only when they constrain the
@@ -186,13 +190,24 @@ module from the base image, not Python `re`. All matches for one response share 
 `patternProperties` is rejected. A client must send its request line and headers
 within 60 seconds (this includes keep-alive idle time) and its body within 300
 seconds; else the server closes the connection (HTTP 408 for a late body).
-Generation and response writes have no timeout.
+A streaming write that the client does not take within 60 seconds ends the stream;
+other response writes have no timeout. A request waits at most 7200 seconds for its
+generation (HTTP 504 `generation_timeout`). A client that disconnects or stops
+reading a stream cancels its job: queued jobs are skipped, a running job stops at
+the next generator step (`[serve] request cancelled: client disconnected`). A reset
+or closed idle keep-alive connection is closed without a traceback.
 
-Chat `stream=true` is **buffered SSE**, marked
-`X-EXL3-Transport: buffered-sse`: generation finishes before content/reasoning/tool
-frames are sent. Optional usage and `[DONE]` complete the transport. It is not
-incremental token streaming, and first-event arrival must not be reported as
-TTFT. Raw completion streaming is unsupported. Native thinking controls remain
+Chat `stream=true` is incremental SSE (`X-EXL3-Transport: streaming`): chunked
+transfer coding for HTTP/1.1 requests, a close-delimited body for HTTP/1.0. The role
+chunk is sent at once; `reasoning_content` and `content` deltas follow as tokens are
+generated (a tail that could begin `</think>` or `<tool_call>` waits for the next
+tokens). From `<tool_call>` on, the text is held and parsed at the end of the turn;
+tool-call deltas, the finish reason, optional usage and `[DONE]` follow. After 10
+seconds without a write (queue wait, prefill, held tool calls) the server sends an
+SSE comment `: keep-alive`. A failure after the status line is an SSE `error` event
+that ends the stream. Usage reports prefix-cache hits as
+`prompt_tokens_details.cached_tokens`. Raw completion streaming is unsupported.
+Native thinking controls remain
 in `chat_template_kwargs`; OpenAI top-level `reasoning_effort` is also accepted:
 `none` disables thinking, `minimal` maps to `low`, `high` and `max` map to `xhigh`,
 and `low`, `medium` and `xhigh` are unchanged. Invalid values or conflicting
