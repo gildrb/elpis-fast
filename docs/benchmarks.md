@@ -706,7 +706,7 @@ Declared 350 W, core 0, memory 0 (§3). Image `tree3s` (`sha256:ec9751b0…`), #
 
 ## 9. elpis served-exact precision qualification (2026-09-30)
 
-elpis's target remains never less precise than stock ExLlamaV3; **#76/#77 currently violate that bar; precision qualification withdrawn.** elpis-fast metrics and live `p3021r` are unchanged.
+elpis's target remains never less precise than stock ExLlamaV3; **#76/#77 violate that bar (2026-09-30); precision qualification withdrawn.** elpis-fast metrics and the then-live `p3021r` were unchanged.
 
 | Evidence | Scope / result |
 |---|---|
@@ -875,7 +875,7 @@ Limit found: one 270K-token cache for all clients. A request with another prefix
 
 Evidence: `/tmp/kernel-work/AR/soak/runs/fix1.metrics{,.json,.window}`.
 
-Live since 2026-10-10 19:21: `qwen-exl3-serving-11`, image `serve-fix1` (`pfast5` engine + server 2ae8d35), previous `serving-10` (`p3021r`) kept for rollback (`qwen-inference:exl3-previous`). Promotion checks: endpoint, live tool round trip, Hermes gateway and interactive tool turns, OMP read turn, Autolith 55-tool request. Live stream: first byte 2 ms; 191 tokens in 0.91 s.
+Live 2026-10-10 19:21-20:04: `qwen-exl3-serving-11`, image `serve-fix1` (`pfast5` engine + server 2ae8d35), previous `serving-10` (`p3021r`) kept for rollback (`qwen-inference:exl3-previous`). Promotion checks: endpoint, live tool round trip, Hermes gateway and interactive tool turns, OMP read turn, Autolith 55-tool request. Live stream: first byte 2 ms; 191 tokens in 0.91 s. Replaced by serving-12 (below).
 
 ### Host-RAM page tier (`--cpu-cache-gib 8`, image `tier1`, `sha256:cad55836…`)
 
@@ -892,3 +892,21 @@ The engine's `CPUPageCache` (off by default) keeps evicted K/V pages (target and
 Same 44-turn soak (all OK, recall 12/12): turn 41, after the 192K recall branch, 36.5 s to first token with 192,256 cached (197 s without the tier). Turn texts from 41 on differ from the run without the tier: there, turn 41 was a cold prefill, here a cache hit (cold prefill and cache hits are different arithmetic paths; the tier itself copies bytes). Evidence: `/tmp/kernel-work/AR/soak/runs/tier1.metrics{,.thrash.json,.json}`.
 
 Live since 2026-10-10 20:04: `qwen-exl3-serving-12`, image `tier1` (server 3b6b46b), same promotion checks all PASS; startup `host page tier 8 GiB: 1783 pages of 4816896 bytes` (456K tokens); container memory 21.3 / 48 GiB. serving-11 kept for rollback.
+
+## 13. Draft fine-tune `ag1` (not shipped)
+
+Agent-tuned DFlash2 draft. Candidate: `/mnt/ssd/storage/ai/qwen3.8-27b/draft-tune/exl3/agent-ag1/cand-norm`, sha256 `aa8c684e944f1758ff60463bd25d7ed894f64e19f7401141f547bcc90133d809` (checkpoint step 913). 236 held-out prompts; texts 236/236 identical to the shipped draft (greedy; the draft never changes the output).
+
+| Category | Tokens per round, Δ |
+|---|---|
+| agent_fc | +5.45 % |
+| agent_swe | +6.63 % |
+| chat | +0.05 % |
+| code_comp | +0.08 % |
+| code_practical | +0.49 % |
+| logic | +0.18 % |
+| math | −0.27 % |
+| mcq | +0.15 % |
+| Pooled | 4.143 → 4.203 (+1.45 %) |
+
+Not shipped: the project closed; the tokens-per-round gain has no decode tok/s measurement.

@@ -280,12 +280,15 @@ replace the gate with a direct launch, or start a competing root Compose/Nix
 service. Future maintenance must use the retained deployment and its approved
 ownership procedure. Restart configuration is not a demonstrated cold-boot test.
 
-Current private evidence is in `exl3-serving-10/evidence/` under the state root:
+Current private evidence is in `exl3-serving-12/evidence/` under the state root:
 `main-verification.json`, `promotion-receipt.json`, `cutover-receipt.json`,
-`endpoint-smoke.json`, `live-tool-smoke.json`, `hermes-real-tool-turns.json`,
-`hermes-interactive-stream.jsonl`, `omp-smoke.jsonl`, `autolith-request.json`,
-`autolith-replay.json`, `installed-exl3-server.py`, `guardian.log` and `thermal.csv`.
-The guardian exited 0 with state `promoted_authenticated_main_verified`. Real Hermes
+`endpoint-smoke.json`, `live-tool-smoke.json`, `live-tool-smoke.py`,
+`hermes-real-tool-turns.json`, `hermes-interactive-stream.jsonl`, `omp-smoke.jsonl`,
+`autolith-request.json`, `autolith-replay.json`, `installed-exl3-server.py`,
+`guardian.log` and `thermal.csv` (promotion checks: `docs/benchmarks.md` §12).
+
+serving-10's evidence (`exl3-serving-10/evidence/`) records:
+the guardian exited 0 with state `promoted_authenticated_main_verified`. Real Hermes
 gateway and interactive (2026.9.24) terminal-tool turns, an OMP 18.4.12 read-tool round
 trip and the captured Autolith 0.57.0 request (55 tools; HTTP 400 on serving-9) passed
 against the new image. After promotion, an interactive Autolith 0.57.0 turn called

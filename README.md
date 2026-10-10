@@ -9,6 +9,12 @@
 - Decode: int8 Q·Kᵀ in the verify attention.
 - GPU: one RTX 3090, 350 W cap.
 - Proof: `bend PROOF.bend` (Bend 2.0.35): ALL PROOFS CHECK. `--verdict` (Lean 4.34.0 kernel): every proof module.
+- Speed (`pfast5`, 350 W): prefill 1,220.7 tok/s, decode 125.7 tok/s (geomeans); 262K TTFT 299.53 s; decode 25.44 ms per verify round at 1K, 45.59 ms at 262K ([Speed](#speed)).
+- Quality: keep a speedup only if the text is unchanged or it passes a quality gate (`Int8Gate`, `DecGate`) ([What fast means](#what-fast-means)).
+- Served live: `qwen-exl3-serving-12`, image `tier1` (`pfast5` engine, server 3b6b46b) ([docs/docker.md](docs/docker.md#current-persistent-live-deployment)).
+- Long sessions: real SSE streaming; cancel on disconnect or a stalled reader; no HTTP 502 for model tool output; 8 GiB host-RAM page tier for evicted prefix pages: 16 s, not 80 s, for a 94K prefix pushed out by another client; 36 s, not 197 s, at 193K ([benchmarks §12](docs/benchmarks.md#12-long-agent-sessions-2026-10-10)).
+- Draft fine-tune `ag1`: +5.45 % / +6.63 % tokens per round on agent tool-call / SWE prompts, +1.45 % pooled, texts identical; not shipped ([benchmarks §13](docs/benchmarks.md#13-draft-fine-tune-ag1-not-shipped)).
+- Status: finished, no further optimization planned.
 
 [elpis](https://github.com/gildrb/elpis) is the lossless sibling: same model, same benchmarks, every changed op proven no less accurate than stock.
 
@@ -186,7 +192,7 @@ docker compose --project-name qwen-inference up --no-build --pull never --detach
 ```
 
 - API: `http://127.0.0.1:18020/v1`, model `qwen3.8-27b`. Do not run another inference service on the same GPU.
-- Prefix cache: kept across restarts, bound to `QWEN_IMAGE_ID`. `QWEN_PREFIX_PERSIST=0` turns it off.
+- Prefix cache: one 270K-token GPU cache + an 8 GiB host-RAM page tier (`--cpu-cache-gib 8`). Not kept across restarts: the persistent prefix cache does not run with the tier ([docs/docker.md](docs/docker.md)).
 - Docker owns runtime and restarts. Nix pins the tools, the `.#bend` toolchain and a Compose adapter ([nix/STANDALONE.md](nix/STANDALONE.md)).
 
 ## Measure
