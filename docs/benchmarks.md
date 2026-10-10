@@ -874,3 +874,5 @@ Soak (image `serve-fix1`, `sha256:35957772…`, serve window, 350 W): one script
 Limit found: one 270K-token cache for all clients. A request with another prefix (other tools, other system prompt) at 133K-192K evicts the session's pages. The next session turn then re-prefills: 197 s at 193K (turn 41). Separate clients on one endpoint each pay this cost when they alternate.
 
 Evidence: `/tmp/kernel-work/AR/soak/runs/fix1.metrics{,.json,.window}`.
+
+Live since 2026-10-10 19:21: `qwen-exl3-serving-11`, image `serve-fix1` (`pfast5` engine + server 2ae8d35), previous `serving-10` (`p3021r`) kept for rollback (`qwen-inference:exl3-previous`). Promotion checks: endpoint, live tool round trip, Hermes gateway and interactive tool turns, OMP read turn, Autolith 55-tool request. Live stream: first byte 2 ms; 191 tokens in 0.91 s.
