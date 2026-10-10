@@ -141,13 +141,15 @@ credential and root filesystem, private writable cache, restricted tmpfs,
 and library caches into `/cache` and uses CDI's `/usr/local/nvidia/lib64` driver
 path. The served model is `qwen3.8-27b` at `http://127.0.0.1:18020/v1`.
 
-Compose always binds `prefix-cache/` at `/prefix-cache`, so the launcher always
-passes `--prefix-cache`. The persistent prefix cache is bound to the image ID:
-`QWEN_IMAGE_ID` must be the full ID `sha256:<64 hex>` of `QWEN_IMAGE`
-(`docker image inspect -f '{{.Id}}' "$QWEN_IMAGE"`); without it, or with a bare hex
-value, persistence stays off. Its engine module (`exllamav3.generator.persist`,
-patch 9501b) exists only in the `candidate-ext` image: `baseline`, `candidate` and
-`candidate-rebuilt` fail at startup with `ModuleNotFoundError` unless
+The launcher passes `--cpu-cache-gib 8`: a host-RAM page tier (engine
+`generator/cpu_cache.py`) of 8 GiB pinned memory, inside the container's 48-GiB
+limit. Prefix pages evicted from the 270K-token GPU cache move there and come
+back on the next prefix hit, so a long session that another client pushed out
+does not re-prefill (`docs/benchmarks.md` §12). The persistent prefix cache
+(`exllamav3.generator.persist`, patch 9501b) refuses to run with the tier, so the
+launcher no longer passes `--prefix-cache`; Compose still binds `prefix-cache/`.
+`--prefix-cache DIR` without the tier keeps the old behaviour: bound to the image
+ID (`QWEN_IMAGE_ID`, full `sha256:<64 hex>`), `candidate-ext` only, off with
 `QWEN_PREFIX_PERSIST=0`.
 
 The healthcheck authenticates `/health` and the expected `/v1/models` entry. It

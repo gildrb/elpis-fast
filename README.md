@@ -227,8 +227,9 @@ Every source link, its engine tree and its inputs: [docs/development.md](docs/de
 
 ```
 - Greedy only. One sequence at a time.
-- One 270K-token prefix cache for all clients. A request with another prefix can evict a long
-  session; its next turn re-prefills (197 s at 193K). See docs/benchmarks.md §12.
+- One 270K-token GPU prefix cache for all clients. Evicted pages wait in an 8 GiB host-RAM tier;
+  a long session pushed out by another client resumes from it (36 s at 193K, not 197 s; §12).
+  No persistent prefix cache across restarts while the tier is on.
 - Chat stream=true streams reasoning and content as generated; tool calls arrive at the end of the turn.
 - Prefill and decode verify attention compute Q·Kᵀ in int8. Outputs can differ from fp16.
   EXL3_AV_FAST=0 restores the exact decode attention kernel.

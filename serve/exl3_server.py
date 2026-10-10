@@ -148,6 +148,11 @@ TOOL_OPEN = "<tool_call>"
 PERSIST_ENV = "QWEN_PREFIX_PERSIST"
 PERSIST_IDLE_SECONDS = 30
 PERSIST_INTERVAL_SECONDS = 300
+# Host-RAM page tier (engine generator/cpu_cache.py): pages evicted from the GPU
+# cache move to pinned host memory and come back on a prefix hit. The engine's
+# persistence (PrefixStore) refuses to run with the tier on.
+GIB = 1024**3
+MAX_CPU_CACHE_GIB = 64.0
 # Stop budget from SIGTERM to exit, inside the guardian's 45 s and Compose's 60 s grace.
 STOP_BUDGET_SECONDS = 40
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -2112,7 +2117,14 @@ class Server:
             self.tokenizer,
             draft_model=draft_model,
             draft_cache=draft_cache,
+            cpu_cache_size=round(args.cpu_cache_gib * GIB),
         )
+        tier = self.gen.cpu_page_cache
+        if tier is not None:
+            log_line(
+                f"[serve] host page tier {args.cpu_cache_gib:g} GiB: "
+                f"{tier.max_slots} pages of {tier.slot_size} bytes"
+            )
         # Fixed (non-dynamic) verify window; usage accounting divides by it.
         self.draft_window: int = self.gen.num_draft_tokens
         if type(self.draft_window) is not int or self.draft_window != max_history:
@@ -3299,7 +3311,15 @@ def main() -> None:
         default=None,
         help="private directory for the persistent prefix cache (off when omitted)",
     )
+    parser.add_argument(
+        "--cpu-cache-gib",
+        type=float,
+        default=0.0,
+        help="pinned host-RAM tier for evicted prefix pages, GiB (0 = off)",
+    )
     args = parser.parse_args()
+    if not 0.0 <= args.cpu_cache_gib <= MAX_CPU_CACHE_GIB:
+        parser.error(f"--cpu-cache-gib must be within 0..{MAX_CPU_CACHE_GIB:g}")
     if (
         args.max_model_len != CONTEXT
         or args.cache_tokens != CACHE_TOKENS

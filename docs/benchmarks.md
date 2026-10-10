@@ -876,3 +876,17 @@ Limit found: one 270K-token cache for all clients. A request with another prefix
 Evidence: `/tmp/kernel-work/AR/soak/runs/fix1.metrics{,.json,.window}`.
 
 Live since 2026-10-10 19:21: `qwen-exl3-serving-11`, image `serve-fix1` (`pfast5` engine + server 2ae8d35), previous `serving-10` (`p3021r`) kept for rollback (`qwen-inference:exl3-previous`). Promotion checks: endpoint, live tool round trip, Hermes gateway and interactive tool turns, OMP read turn, Autolith 55-tool request. Live stream: first byte 2 ms; 191 tokens in 0.91 s.
+
+### Host-RAM page tier (`--cpu-cache-gib 8`, image `tier1`, `sha256:cad55836…`)
+
+The engine's `CPUPageCache` (off by default) keeps evicted K/V pages (target and draft cache) in pinned host memory; recurrent (GDN) checkpoints already live in host RAM. The server now turns it on. Thrash check: A = system S1 + 93,967-token document; B = system S2 + 185,191-token document (A + B > 270K, so B evicts A); then A again.
+
+| Request | Time | Cached tokens | Text |
+|---|---|---|---|
+| A, cold | 79.6 s | 0 | reference |
+| B, cold | 207.7 s | 0 | reference |
+| A again (pages from host RAM) | 16.2 s | 93,952 | = A |
+| A prefix, other question | 2.4 s | 92,160 | |
+| B again | 1.9 s | 185,088 | = B |
+
+Same 44-turn soak (all OK, recall 12/12): turn 41, after the 192K recall branch, 36.5 s to first token with 192,256 cached (197 s without the tier). Turn texts from 41 on differ from the run without the tier: there, turn 41 was a cold prefill, here a cache hit (cold prefill and cache hits are different arithmetic paths; the tier itself copies bytes). Evidence: `/tmp/kernel-work/AR/soak/runs/tier1.metrics{,.thrash.json,.json}`.
