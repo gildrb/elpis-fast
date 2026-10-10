@@ -218,31 +218,30 @@ reasoning and final content remain separate channels.
 
 ## Current persistent live deployment
 
-The current authenticated promotion is `qwen-exl3-serving-10`, container
-`7b98d3dc23193b4e5c7561d4418cadbe83f824e4d233724dfcbff3d63f61b07b`, with image
-`sha256:bc21628f38e13fba42084318e413a61f998f331015d3ca40c99bdb216ae4021c`
-(`qwen-inference:exl3-cand-p3021r-autolith`). It is a server-only hotfix of p3021r: the
-p3021r image layers unchanged, plus one layer that replaces
-`/opt/qwen/serve/exl3_server.py` (sha256 `a10b3137…25b7`) = the c10606d server + 111e727
-(Python-cased tool literals) + 5f39088 (root composition, required by Autolith 0.57.0).
-Engine, labels and `exl3-patches.json` are the p3021r ones. The repository HEAD server
-is not used here because it needs the pfast prefix-persist engine.
-p3021r is `sha256:91b01c532280424832d2501e72ebe743ac3fb9aea4ee070e73e81a41c6262d19`
-(variant `candidate-ext`: the #73 stack of `docs/benchmarks.md` §8, tree3s plus the
-prefill patches 3020, 5111, 5112 and 3021c, which computes prefill Q·Kᵀ in int8,
-rebuilt from commit 14a15c6 after the eta → elpis rename; #74 reproduced #73's 9 rows
-byte for byte). The canonical tag `qwen-inference:exl3` identifies the serving-10 image
-and `qwen-inference:exl3-previous` the retained p3021r image.
+The current authenticated promotion is `qwen-exl3-serving-12` (2026-10-10), container
+`d7826c4b604a0c9d84dee74c1184c5f00dfb0c4a1ded1b9a9113bec242a71a57`, image
+`sha256:cad5583694e7e35735d27facc97f9ee5274c25388b7fb0bf9e21f3d4f42f94f6`
+(`qwen-inference:exl3-cand-tier1`): the `pfast5` `candidate-ext` engine
+(`docs/benchmarks.md` §11) with the server and launcher of commit 3b6b46b (streaming
+SSE, cancel on disconnect, 8 GiB host page tier; §12). Startup log:
+`host page tier 8 GiB: 1783 pages of 4816896 bytes` (456K tokens). The canonical tag
+`qwen-inference:exl3` names this image; `qwen-inference:exl3-previous` is the
+serving-11 image `serve-fix1` (`sha256:35957772…`, same engine, server 2ae8d35, no tier).
 The persistent configuration is
-`/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-10/compose.json` (Compose project
-`elpis-exl3-serving-10`, network `elpis_default`), alongside unchanged copies of
+`/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-12/compose.json` (Compose project
+`elpis-exl3-serving-12`, network `elpis_default`), alongside unchanged copies of
 `launch-gate.py`, `recovery.py` and `operate.py` and its promoted `cutover-window-1/`.
 It sequentially reuses `/mnt/ssd/storage/ai/qwen3.8-27b/exl3-serving-1/cache`; preserve
-the old state. Promotions are made by `/tmp/elpis-promote.sh TAG IMAGE` (operator
-tooling outside the repo), which replays the serving-2 guardian procedure below with
-automatic guardian rollback. serving-10 used its copy `/tmp/elpis-promote-hotfix.sh`,
-which pins the adapter to the hotfix file instead of repository HEAD, verifies the mise
-Hermes CLI through its stream-json events, and replays a captured Autolith request.
+the old state. Promotions are made by
+`ADAPTER_REV=<commit> /tmp/elpis-promote.sh TAG IMAGE` (operator tooling outside the
+repo), which replays the serving-2 guardian procedure below with automatic guardian
+rollback. It pins the adapter to `git show <commit>:serve/exl3_server.py`, checks the
+`base-manifest-sha256` label against `docker/base/engine-manifest.json`, runs CPU smokes
+adapted to this server, verifies the mise Hermes CLI through its stream-json events,
+and replays a captured Autolith request. `PROMOTE_QUIET=<script>` replaces the
+quiet-host wait (promotion measures no speed). serving-11 (`serve-fix1`) and serving-10
+(container `7b98d3dc…`, image `sha256:bc21628f…`, p3021r server hotfix) are retained
+for rollback.
 The previous `qwen-exl3-serving-9` (container
 `b930391224e8806e925fdd128c34446c52673959ae3451388870b249d48b121a`, image p3021r,
 Compose project `elpis-exl3-serving-9`), `qwen-exl3-serving-8` (container
